@@ -1,154 +1,188 @@
 # Discord music bot
 
-A friends-only music bot for a personal Linux VPS. It is one Node.js process: [discord.js](https://discord.js.org/) v14 and `@discordjs/voice` play audio, and `yt-dlp` reads the stream. There is no Lavalink server, no Docker setup, and no database. The queue lives in memory and is cleared when the process stops.
+Friends-only music bot. Lavalink plays the audio. The bot decides what is allowed to play. YouTube, yt-dlp, and browser cookies are not used.
 
-## What you can play
+Lavalink is only the player. It does not supply a music catalogue, and this project does not turn on Lavalink's YouTube or SoundCloud scrapers.
 
-- A song name. That searches YouTube.
-- A direct link from YouTube, YouTube Music, SoundCloud, Bandcamp, and the other sites `yt-dlp` supports.
-- A Spotify, Deezer, or Apple Music song, album, or playlist. Those services do not give bots their audio, so the bot plays the matching YouTube recording. Apple Music playlists are the exception: paste the song, the album, or the song name.
-- Playlists, albums, and SoundCloud sets are queued up to 50 tracks.
+## What can play
 
-## Limits
+- **Local files** in the `music` folder. This is the dependable source. Name files `Artist - Title.mp3` (also flac, ogg, opus, wav, m4a, aac).
+- **SoundCloud** tracks the official API marks as streamable for your developer app. A 30-second preview is not played as if it were the full song.
+- **Spotify links** for metadata only (title, artist, album, duration). The bot searches the local library, then SoundCloud, and plays a match. It never streams Spotify's audio. If nothing matches, it says so and does not substitute a different song.
 
-- Private and age-restricted videos fail with an error in Discord.
-- YouTube sometimes asks a datacenter IP to sign in. `/play` reports that in Discord. Export a Netscape `cookies.txt` and set `YTDLP_COOKIES` to its path if it keeps happening. Do not commit that file.
-- One queue per server, up to 50 waiting tracks. Restarting the bot clears it.
+A YouTube link gets: `YouTube playback is not supported.`
 
-## What you need
+## Requirements
 
-- Node.js 20 or newer
-- `ffmpeg` on `PATH`
-- `yt-dlp` on `PATH`. The Linux release is a Python program, so Python 3.11 or newer is required too.
+- Node.js 22.13 or newer (`node:sqlite` is built in; you may see an experimental warning)
+- Java 17 or newer (Java 21 is a good choice) for Lavalink
+- A Discord bot token
+- Lavalink 4.2.2, downloaded separately and not committed
 
-On Debian or Ubuntu:
+On the VPS, ffmpeg and yt-dlp are no longer required. `cookies.txt` can be deleted.
 
-```bash
-sudo apt update
-sudo apt install -y ffmpeg python3 curl
-sudo curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp
-sudo chmod a+rx /usr/local/bin/yt-dlp
-yt-dlp --version
-ffmpeg -version
-```
-
-Use that yt-dlp release rather than the `apt` package. The distro package is often too old to extract YouTube audio. `yt-dlp` and `ffmpeg` are started by the bot when someone plays a track. They are not a separate music server.
-
-## 1. Create the Discord application
-
-1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create a new application.
-2. Open **Bot** and click **Reset Token**. Put that token in `.env` as `DISCORD_TOKEN`. Do not commit it or paste it into the code.
-3. Copy the **Application ID** from **General Information**. You need it for the invite link.
-
-## 2. Intents
-
-The bot requests only these gateway intents:
-
-- **Guilds** — slash commands, and the text channel used for playback errors
-- **Guild Voice States** — see who is in voice so commands can require a voice channel
-
-Neither intent is privileged. On the Bot page, leave **Presence Intent**, **Server Members Intent**, and **Message Content Intent** turned off. Message content is unused because every command is a slash command. There is often no separate toggle for Guilds or Guild Voice States; requesting them from the code is enough.
-
-## 3. Invite the bot
-
-Replace `YOUR_CLIENT_ID` with the application id:
-
-```text
-https://discord.com/api/oauth2/authorize?client_id=YOUR_CLIENT_ID&permissions=3145728&scope=bot%20applications.commands
-```
-
-That URL asks for the `bot` and `applications.commands` scopes, plus **Connect** (`1048576`) and **Speak** (`2097152`). Open it in a browser, choose your friends' server, and authorize.
-
-Slash command replies use Discord's interaction webhook, so Send Messages is not required for command responses. If a voice channel has its own permission overwrites, allow the bot's role to **View Channel**, **Connect**, and **Speak** there too.
-
-## 4. Configure
+## Configuration
 
 ```bash
 cp .env.example .env
 ```
 
-`.env.example` lists:
+Set `DISCORD_TOKEN`. Set `GUILD_ID` to your server id if you want slash commands to update immediately.
 
-| Variable | Required | Purpose |
-| --- | --- | --- |
-| `DISCORD_TOKEN` | yes | Bot token from the Developer Portal |
-| `GUILD_ID` | no | Server id. Set it so commands register on that server immediately. Leave it empty to register globally. |
-| `YTDLP_COOKIES` | no | Path to a Netscape `cookies.txt` if YouTube blocks the VPS with a sign-in check. |
+`LAVALINK_PASSWORD` must be the same as `password` under `lavalink.server` in `lavalink/application.yml`. Both ship as `changeme`. Change both if the machine is shared. Lavalink listens on `127.0.0.1:2333` only. Do not open that port.
 
-Enable Developer Mode in Discord (User Settings → Advanced), then right-click the server icon and choose **Copy Server ID**.
+Optional:
 
-## 5. Install and run
+| Variable | Purpose |
+| --- | --- |
+| `OWNER_ID` | Discord user id. One direct message per hour if Lavalink is down. |
+| `SOUNDCLOUD_CLIENT_ID` | SoundCloud app client id |
+| `SOUNDCLOUD_CLIENT_SECRET` | SoundCloud app secret, used to refresh the API token |
+| `SPOTIFY_CLIENT_ID` | Spotify app client id |
+| `SPOTIFY_CLIENT_SECRET` | Spotify app secret |
+| `PROVIDER_ORDER` | Playback order. Default `local,soundcloud`. |
+| `LOCAL_MUSIC_DIR` | Folder of audio files. Default `music`. |
+| `DATABASE_PATH` | SQLite file. Default `data/bot.sqlite`. |
 
-From this directory:
+Leave a provider's variables empty to disable it. `PROVIDER_ORDER=local` disables SoundCloud searches without affecting files already in the library. Spotify turns on only when both Spotify variables are set. It is not a playback source.
+
+No tokens belong in source files.
+
+## Lavalink
+
+Download the jar once:
+
+```bash
+curl -L -o lavalink/Lavalink.jar https://github.com/lavalink-devs/Lavalink/releases/download/4.2.2/Lavalink.jar
+```
+
+Start it from the project root so local files resolve:
+
+```bash
+java -jar lavalink/Lavalink.jar --spring.config.additional-location=file:./lavalink/application.yml
+```
+
+Then, in another terminal:
 
 ```bash
 npm install
 npm start
 ```
 
-`npm start` runs `node src/index.js`. On startup the process:
+The bot reconnects if Lavalink drops. It still cannot play until Lavalink is back and a provider has a real file or an allowed SoundCloud stream.
 
-1. Exits with an error if `DISCORD_TOKEN` is missing.
-2. Logs in.
-3. Registers the slash commands.
+## Discord setup
 
-Guild registration (`GUILD_ID` set) shows up in that server right away. Global registration (empty `GUILD_ID`) can take up to an hour. Restart the bot after changing commands. If you previously registered globally and then set `GUILD_ID`, old global commands can linger until you clear them in the Developer Portal.
+1. Create an application and a bot at the Discord Developer Portal.
+2. Leave privileged intents off. The bot uses Guilds and Guild Voice States only.
+3. Invite it with Connect, Speak, and applications.commands. Send Messages and Read Message History let the on-screen player update in place:
 
-Check the syntax of the source without logging in:
+   `https://discord.com/api/oauth2/authorize?client_id=YOUR_APPLICATION_ID&permissions=3213312&scope=bot%20applications.commands`
+
+   Connect and Speak alone (`permissions=3145728`) still run the slash commands.
+4. Join a voice channel and use `/play`.
+
+Commands: `/play`, `/playnow`, `/pause`, `/resume`, `/skip`, `/stop`, `/clear`, `/queue`, `/nowplaying`, `/leave`, `/volume`, `/playlist`, `/history`. The player buttons are Previous, Pause/Resume, Next, and Stop. `/clear` removes upcoming songs and leaves the current one playing. `/playnow` interrupts the current song and keeps the rest of the queue.
+
+You need to be in a voice channel. If the bot is already in one, you need to be in that same channel.
+
+## Windows development
+
+1. Install Node.js 22 and Temurin or another Java 21 JDK.
+2. Clone the repo and `npm install`.
+3. Copy `.env.example` to `.env` and fill it in.
+4. Put songs in `music\`.
+5. Download `Lavalink.jar` into `lavalink\`.
+6. From the project folder, start Lavalink:
+
+   `java -jar lavalink\Lavalink.jar --spring.config.additional-location=file:./lavalink/application.yml`
+
+7. In a second terminal: `npm start`.
+
+## Linux VPS
 
 ```bash
-npm run check
+apt update
+apt install -y openjdk-21-jre-headless curl ca-certificates
+curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+apt install -y nodejs
+cd /opt/discord-music-bot
+git pull
+npm install
+cp -n .env.example .env
+curl -L -o lavalink/Lavalink.jar https://github.com/lavalink-devs/Lavalink/releases/download/4.2.2/Lavalink.jar
+mkdir -p music
 ```
 
-## 6. Commands
+Edit `.env`. Remove any old `YTDLP_COOKIES` line. Put files in `/opt/discord-music-bot/music`.
 
-Everyone who uses a command must already be in a voice channel. If the bot is already in voice, you have to be in that same channel.
+`/etc/systemd/system/lavalink.service`:
 
-| Command | What it does |
-| --- | --- |
-| `/play query:` | Song name or a link (YouTube, Spotify, SoundCloud, Deezer, Apple Music, and other sites yt-dlp supports). Joins your channel if needed. |
-| `/pause` | Pauses the current track. |
-| `/resume` | Resumes a paused track. |
-| `/skip` | Skips the current track and plays the next one. |
-| `/stop` | Stops playback and clears the queue. The bot stays in voice. |
-| `/queue` | Shows the current track and up to 10 upcoming tracks. |
-| `/nowplaying` | Shows the current track. |
-| `/leave` | Leaves voice and clears the queue. |
+```ini
+[Unit]
+Description=Lavalink audio server
+After=network-online.target
 
-Discord replies when a search or link fails, when nothing is playing, and when the bot is not in a voice channel.
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/discord-music-bot
+ExecStart=/usr/bin/java -jar /opt/discord-music-bot/lavalink/Lavalink.jar --spring.config.additional-location=file:./lavalink/application.yml
+Restart=on-failure
+RestartSec=5
 
-## 7. systemd
-
-Example unit for a Linux VPS. Adjust the user and the install path. `EnvironmentFile` loads `.env` (including `DISCORD_TOKEN`) without putting the token in the unit file.
+[Install]
+WantedBy=multi-user.target
+```
 
 `/etc/systemd/system/discord-music-bot.service`:
 
 ```ini
 [Unit]
 Description=Discord music bot
-After=network-online.target
-Wants=network-online.target
+After=network-online.target lavalink.service
 
 [Service]
 Type=simple
-User=nizar
+User=root
 WorkingDirectory=/opt/discord-music-bot
 EnvironmentFile=/opt/discord-music-bot/.env
-ExecStart=/usr/bin/env node src/index.js
+ExecStart=/usr/bin/node src/index.js
 Restart=on-failure
 RestartSec=5
-NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now discord-music-bot
-sudo systemctl status discord-music-bot
+systemctl daemon-reload
+systemctl enable --now lavalink
+systemctl restart discord-music-bot
 ```
 
-Logs: `journalctl -u discord-music-bot -f`.
+Confirm Lavalink before blaming the bot:
 
-Stopping the service disconnects the bot from voice. The in-memory queue is not saved.
+```bash
+curl -s -H "Authorization: changeme" http://127.0.0.1:2333/version
+```
+
+Use the password from `.env` if you changed it. `journalctl -u lavalink -u discord-music-bot -f` shows both logs.
+
+After a later `git pull`, run `npm install` and restart both units if `package-lock.json` or `lavalink/application.yml` changed. The jar is not in git.
+
+## Checks
+
+```bash
+npm test
+node src/index.js
+```
+
+Without `DISCORD_TOKEN`, the process exits and tells you to set it. `npm test` does not call Discord, Spotify, SoundCloud, or Lavalink.
+
+## Limits
+
+- One Lavalink node on localhost. Each Discord server has its own queue and player.
+- Playlists are capped at 50 tracks. Saved playlists store the file path or SoundCloud id, not an expiring stream URL.
+- SoundCloud can refuse streams when the app lacks permission. That failure is logged and shown as a normal error. The rest of the bot keeps running.
+- Local files are the source that does not depend on an external account.

@@ -3,3 +3,10 @@ node_modules/
 cookies.txt
 npm-debug.log*
 *.log
+data/
+logs/
+lavalink/*.jar
+lavalink/logs/
+lavalink/plugins/
+music/*
+!music/.gitkeep

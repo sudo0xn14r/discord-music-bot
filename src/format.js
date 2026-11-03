@@ -20,9 +20,16 @@ function formatDuration(seconds) {
   return `${minutes}:${pad(secs)}`;
 }
 
+function formatTrackLength(durationMs, positionMs) {
+  if (!Number.isFinite(durationMs) || durationMs < 0) return 'unknown length';
+  const total = formatDuration(durationMs / 1000);
+  if (!Number.isFinite(positionMs) || positionMs < 0) return total;
+  return `${formatDuration(positionMs / 1000)} / ${total}`;
+}
+
 function shortError(error) {
   const message = error instanceof Error ? error.message : String(error || 'Unknown error');
   return message.replace(/\s+/g, ' ').trim().slice(0, 300) || 'Unknown error';
 }
 
-module.exports = { oneLine, formatDuration, shortError };
+module.exports = { oneLine, formatDuration, formatTrackLength, shortError };
