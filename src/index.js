@@ -1,9 +1,9 @@
 const path = require('node:path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const { Client, Events, GatewayIntentBits, REST, Routes } = require('discord.js');
+const { Client, Events, GatewayIntentBits, MessageFlags, REST, Routes } = require('discord.js');
 const { UserError } = require('./errors');
-const { commands } = require('./commands');
+const { commands, executeButton } = require('./commands');
 const { Player } = require('./player');
 
 const token = readEnv('DISCORD_TOKEN');
@@ -41,17 +41,24 @@ client.once(Events.ClientReady || 'ready', async (readyClient) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
-  const command = commandMap.get(interaction.commandName);
-  if (!command) return;
-
   try {
+    if (interaction.isButton() && interaction.customId.startsWith('player:')) {
+      await executeButton(interaction, player);
+      return;
+    }
+    if (!interaction.isChatInputCommand()) return;
+    const command = commandMap.get(interaction.commandName);
+    if (!command) return;
     await command.execute(interaction, player);
   } catch (error) {
     const message = error instanceof UserError
       ? error.message
       : 'Something went wrong running that command.';
     if (!(error instanceof UserError)) console.error(error);
+    if (interaction.isButton()) {
+      await sendButtonError(interaction, message);
+      return;
+    }
     await sendInteractionError(interaction, message);
   }
 });
@@ -94,6 +101,16 @@ async function registerCommands(applicationId) {
   }
   await rest.put(Routes.applicationCommands(applicationId), { body });
   console.log(`Registered ${body.length} global slash commands. They can take up to an hour to appear.`);
+}
+
+async function sendButtonError(interaction, message) {
+  const payload = { content: message, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
+  try {
+    if (interaction.deferred || interaction.replied) await interaction.followUp(payload);
+    else await interaction.reply(payload);
+  } catch (error) {
+    console.error(`Could not send a button error: ${error.message}`);
+  }
 }
 
 async function sendInteractionError(interaction, message) {

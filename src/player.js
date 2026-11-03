@@ -10,8 +10,10 @@ const {
 const { UserError } = require('./errors');
 const { formatDuration, oneLine, shortError } = require('./format');
 const { directMediaUrl, ensurePlayable, friendlyYtError, openAudioStream } = require('./media');
+const { playerMessage } = require('./panel');
 
 const MAX_QUEUE = 50;
+const MAX_HISTORY = 25;
 const MAX_FAILURES = 3;
 
 class GuildSession {
@@ -19,7 +21,10 @@ class GuildSession {
     this.guildId = guildId;
     this.manager = manager;
     this.tracks = [];
+    this.history = [];
     this.current = null;
+    this.rememberCurrent = true;
+    this.panelRef = null;
     this.connection = null;
     this.textChannelId = null;
     this.process = null;
@@ -181,8 +186,16 @@ class GuildSession {
     const generation = ++this.generation;
     this.killProcess();
     const track = this.tracks.shift() || null;
+    if (this.current && this.rememberCurrent) {
+      this.history.push(this.current);
+      if (this.history.length > MAX_HISTORY) this.history.shift();
+    }
+    this.rememberCurrent = true;
     this.current = track;
-    if (!track) return { ok: true };
+    if (!track) {
+      void this.refreshPanel();
+      return { ok: true };
+    }
 
     let opened;
     try {
@@ -218,6 +231,7 @@ class GuildSession {
         throw new Error(detail || 'The audio stream ended before any sound was sent.');
       }
       console.log(`Audio started for ${track.url}.`);
+      void this.refreshPanel();
       if (announce) {
         const via = track.source === 'spotify' || track.source === 'deezer' || track.source === 'apple'
           ? ' (YouTube match)'
@@ -295,14 +309,71 @@ class GuildSession {
     this.assertControllable();
     if (!this.current) throw new UserError('Nothing is playing right now.');
     const title = oneLine(this.current.title);
-    if (this.player.state.status === AudioPlayerStatus.Idle) {
-      this.generation += 1;
-      this.killProcess();
-      void this.playNext({ announce: true });
-    } else {
-      this.player.stop(true);
+    return { text: `Skipped **${title}**.`, playback: this.restart() };
+  }
+
+  async previous() {
+    this.assertControllable();
+    if (!this.history.length) throw new UserError('Nothing to go back to.');
+    const prior = this.history.pop();
+    if (this.current) this.tracks.unshift(this.current);
+    this.tracks.unshift(prior);
+    if (this.tracks.length > MAX_QUEUE) this.tracks.length = MAX_QUEUE;
+    this.rememberCurrent = false;
+    const playback = this.restart();
+    const outcome = await playback;
+    return outcome || { ok: false, reason: 'Playback did not start.' };
+  }
+
+  playNow(tracks) {
+    if (!tracks.length) throw new UserError("I couldn't find anything to play.");
+    const accepted = tracks.slice(0, MAX_QUEUE);
+    const kept = Math.max(0, MAX_QUEUE - accepted.length);
+    this.tracks = [...accepted, ...this.tracks.slice(0, kept)];
+    return {
+      first: accepted[0],
+      added: accepted.length,
+      skipped: tracks.length - accepted.length,
+      playback: this.restart(),
+    };
+  }
+
+  clearUpcoming() {
+    this.assertControllable();
+    const count = this.tracks.length;
+    this.tracks = [];
+    return count;
+  }
+
+  restart() {
+    this.suppressAutoplay = true;
+    this.advanceAfterLock = false;
+    this.generation += 1;
+    this.killProcess();
+    if (this.player.state.status !== AudioPlayerStatus.Idle) this.player.stop(true);
+    this.suppressAutoplay = false;
+    return this.playNext({ announce: false });
+  }
+
+  notePanel(message) {
+    if (!message?.id || !message.channelId) return;
+    this.panelRef = { channelId: message.channelId, messageId: message.id };
+  }
+
+  async refreshPanel(extra) {
+    if (!this.panelRef) return;
+    try {
+      const channel = await this.manager.client.channels.fetch(this.panelRef.channelId);
+      if (!channel?.isTextBased?.()) return;
+      const message = await channel.messages.fetch(this.panelRef.messageId);
+      const payload = this.current || this.tracks.length
+        ? playerMessage(this, extra)
+        : { content: extra || 'Nothing is playing.', components: [], allowedMentions: { parse: [] } };
+      await message.edit(payload);
+    } catch (error) {
+      if (error.code === 10008) this.panelRef = null;
+      else console.error(`Could not update the player: ${error.message}`);
     }
-    return `Skipped **${title}**.`;
   }
 
   stop() {
@@ -311,6 +382,7 @@ class GuildSession {
       throw new UserError('Nothing is playing right now.');
     }
     this.stopPlayback();
+    void this.refreshPanel('Stopped playback and cleared the queue.');
     return 'Stopped playback and cleared the queue.';
   }
 
@@ -331,7 +403,9 @@ class GuildSession {
     this.generation += 1;
     this.killProcess();
     this.tracks = [];
+    this.history = [];
     this.current = null;
+    this.rememberCurrent = true;
     this.playbackError = null;
     this.consecutiveFailures = 0;
     this.player.stop(true);

@@ -9,7 +9,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "check": "node --check src/index.js && node --check src/commands.js && node --check src/player.js && node --check src/media.js && node --check src/format.js && node --check src/errors.js"
+    "check": "node --check src/index.js && node --check src/commands.js && node --check src/player.js && node --check src/panel.js && node --check src/media.js && node --check src/format.js && node --check src/errors.js"
   },
   "dependencies": {
     "@discordjs/voice": "^0.19.2",

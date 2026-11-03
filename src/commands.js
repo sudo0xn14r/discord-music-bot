@@ -1,7 +1,8 @@
-const { EmbedBuilder, InteractionContextType, MessageFlags, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, InteractionContextType, SlashCommandBuilder } = require('discord.js');
 const { UserError } = require('./errors');
 const { formatDuration, oneLine } = require('./format');
 const { matchNote, resolveTracks } = require('./media');
+const { playerMessage } = require('./panel');
 const { MAX_QUEUE } = require('./player');
 
 function guildOnly(builder) {
@@ -44,6 +45,19 @@ const nowplaying = guildOnly(new SlashCommandBuilder())
 const leave = guildOnly(new SlashCommandBuilder())
   .setName('leave')
   .setDescription('Leave the voice channel and clear the queue');
+
+const clear = guildOnly(new SlashCommandBuilder())
+  .setName('clear')
+  .setDescription('Clear the queued songs. The current song keeps playing.');
+
+const playnow = guildOnly(new SlashCommandBuilder())
+  .setName('playnow')
+  .setDescription('Interrupt the current song and play this instead')
+  .addStringOption((option) => option
+    .setName('query')
+    .setDescription('Song name, or a YouTube, Spotify, SoundCloud, Deezer, or other link')
+    .setRequired(true)
+    .setMaxLength(500));
 
 function userVoice(interaction) {
   if (!interaction.inGuild() || !interaction.guild) {
@@ -100,10 +114,89 @@ async function executePlay(interaction, player) {
     await interaction.editReply(`Couldn't play **${oneLine(result.first.title)}**: ${outcome.reason}`);
     return;
   }
-  await interaction.editReply({
-    content: describeAdd(result),
-    flags: MessageFlags.SuppressEmbeds,
-  });
+  const message = await interaction.editReply(playerMessage(session, describeAdd(result)));
+  session.notePanel(message);
+}
+
+async function executePlayNow(interaction, player) {
+  const voice = userVoice(interaction);
+  const existing = player.peek(interaction.guildId);
+  if (existing?.channelId && existing.channelId !== voice.id) {
+    throw new UserError('You need to be in the same voice channel as me.');
+  }
+
+  const query = interaction.options.getString('query', true);
+  await interaction.deferReply();
+  const tracks = await resolveTracks(query, requestedBy(interaction.user), MAX_QUEUE);
+  const session = player.session(interaction.guildId);
+  session.bindTextChannel(interaction.channelId);
+  await session.join(voice);
+  const result = session.playNow(tracks);
+  const outcome = await result.playback;
+  if (outcome?.dropped) {
+    await interaction.editReply('That play was interrupted.');
+    return;
+  }
+  if (!outcome?.ok) {
+    await interaction.editReply(`Couldn't play **${oneLine(result.first.title)}**: ${outcome.reason}`);
+    return;
+  }
+  const note = matchNote(result.first);
+  const headline = `Playing **${oneLine(result.first.title)}** now.${note ? `\n${note}` : ''}`;
+  const message = await interaction.editReply(playerMessage(session, headline));
+  session.notePanel(message);
+}
+
+function executeClear(interaction, player) {
+  const session = player.peek(interaction.guildId);
+  sameChannel(interaction, session);
+  const count = session.clearUpcoming();
+  if (!count) throw new UserError('The queue is already empty.');
+  const text = `Cleared ${count} song${count === 1 ? '' : 's'} from the queue.`;
+  void session.refreshPanel(text);
+  return interaction.reply(text);
+}
+
+async function executeButton(interaction, player) {
+  const session = player.peek(interaction.guildId);
+  sameChannel(interaction, session);
+  session.bindTextChannel(interaction.channelId);
+  session.notePanel(interaction.message);
+  const action = interaction.customId;
+
+  if (action === 'player:pause') {
+    const text = session.player.state.status === 'paused' ? session.resume() : session.pause();
+    await interaction.update(playerMessage(session, text));
+    return;
+  }
+  if (action === 'player:stop') {
+    await interaction.deferUpdate();
+    const text = session.stop();
+    await session.refreshPanel(text);
+    return;
+  }
+  if (action === 'player:next') {
+    await interaction.deferUpdate();
+    const { text, playback } = session.skip();
+    const outcome = await playback;
+    if (outcome && outcome.ok === false && !outcome.dropped) {
+      await session.refreshPanel(`Couldn't play the next song: ${outcome.reason}`);
+      return;
+    }
+    await session.refreshPanel(text);
+    return;
+  }
+  if (action === 'player:prev') {
+    await interaction.deferUpdate();
+    const outcome = await session.previous();
+    if (!outcome.ok && !outcome.dropped) {
+      await session.refreshPanel(`Couldn't play that: ${outcome.reason}`);
+      return;
+    }
+    await session.refreshPanel();
+    return;
+  }
+  throw new UserError('That button is not available.');
 }
 
 function describeAdd(result) {
@@ -137,11 +230,20 @@ function executeResume(interaction, player) {
   return interaction.reply(session.resume());
 }
 
-function executeSkip(interaction, player) {
+async function executeSkip(interaction, player) {
   const session = player.peek(interaction.guildId);
   sameChannel(interaction, session);
   session.bindTextChannel(interaction.channelId);
-  return interaction.reply({ content: session.skip(), allowedMentions: { parse: [] } });
+  await interaction.deferReply();
+  const { text, playback } = session.skip();
+  const outcome = await playback;
+  if (outcome && outcome.ok === false && !outcome.dropped) {
+    const message = await interaction.editReply(playerMessage(session, `Couldn't play the next song: ${outcome.reason}`));
+    session.notePanel(message);
+    return;
+  }
+  const message = await interaction.editReply(playerMessage(session, text));
+  session.notePanel(message);
 }
 
 function executeStop(interaction, player) {
@@ -179,20 +281,13 @@ function executeQueue(interaction, player) {
   return interaction.reply({ embeds: [embed], allowedMentions: { parse: [] } });
 }
 
-function executeNowPlaying(interaction, player) {
+async function executeNowPlaying(interaction, player) {
   const session = player.peek(interaction.guildId);
   sameChannel(interaction, session);
   if (!session.current) throw new UserError('Nothing is playing right now.');
 
-  const status = session.player.state.status;
-  const label = status === 'paused' ? 'Paused' : status === 'buffering' ? 'Starting' : 'Playing';
-  const embed = new EmbedBuilder()
-    .setColor(0x57f287)
-    .setTitle(oneLine(session.current.title))
-    .setURL(session.current.url)
-    .setDescription(`${label} · ${formatDuration(session.current.duration)}\nRequested by ${oneLine(session.current.requestedBy)}`)
-    .setFooter({ text: session.tracks.length ? `${session.tracks.length} queued` : 'YouTube' });
-  return interaction.reply({ embeds: [embed], allowedMentions: { parse: [] } });
+  const message = await interaction.reply({ ...playerMessage(session), fetchReply: true });
+  session.notePanel(message);
 }
 
 function executeLeave(interaction, player) {
@@ -207,13 +302,15 @@ function executeLeave(interaction, player) {
 
 const commands = [
   { data: play, execute: executePlay },
+  { data: playnow, execute: executePlayNow },
   { data: pause, execute: executePause },
   { data: resume, execute: executeResume },
   { data: skip, execute: executeSkip },
   { data: stop, execute: executeStop },
+  { data: clear, execute: executeClear },
   { data: queue, execute: executeQueue },
   { data: nowplaying, execute: executeNowPlaying },
   { data: leave, execute: executeLeave },
 ];
 
-module.exports = { commands };
+module.exports = { commands, executeButton };
