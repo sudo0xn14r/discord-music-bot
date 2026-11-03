@@ -5,6 +5,7 @@ npm-debug.log*
 *.log
 data/
 logs/
+plugins/
 lavalink/*.jar
 lavalink/logs/
 lavalink/plugins/

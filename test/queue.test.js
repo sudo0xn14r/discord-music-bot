@@ -59,3 +59,25 @@ test('play now moves the new track ahead of the current one', () => {
   assert.equal(queue.history[0].title, 'A');
   assert.equal(queue.upcoming[0].title, 'B');
 });
+
+test('move and remove use 1-based positions', () => {
+  const queue = new GuildQueue('1');
+  queue.enqueue([track('A'), track('B'), track('C')]);
+  assert.equal(queue.move(3, 1).title, 'C');
+  assert.deepEqual(queue.upcoming.map((item) => item.title), ['C', 'A', 'B']);
+  assert.equal(queue.removeAt(2).title, 'A');
+  assert.deepEqual(queue.upcoming.map((item) => item.title), ['C', 'B']);
+  assert.equal(queue.removeAt(5), null);
+  assert.equal(queue.move(1, 9), null);
+});
+
+test('shuffle keeps every queued track and reset turns loop off', () => {
+  const queue = new GuildQueue('1');
+  queue.enqueue([track('A'), track('B'), track('C'), track('D')]);
+  queue.loopMode = 'queue';
+  assert.equal(queue.shuffle(), 4);
+  assert.deepEqual(queue.upcoming.map((item) => item.title).sort(), ['A', 'B', 'C', 'D']);
+  queue.reset();
+  assert.equal(queue.loopMode, 'off');
+  assert.equal(queue.upcoming.length, 0);
+});

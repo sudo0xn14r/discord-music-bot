@@ -9,6 +9,7 @@ class GuildQueue {
     this.current = null;
     this.textChannelId = null;
     this.volume = 100;
+    this.loopMode = 'off';
     this.rememberCurrent = true;
   }
 
@@ -63,10 +64,34 @@ class GuildQueue {
     return count;
   }
 
+  removeAt(index) {
+    if (!Number.isInteger(index) || index < 1 || index > this.upcoming.length) return null;
+    return this.upcoming.splice(index - 1, 1)[0];
+  }
+
+  move(from, to) {
+    if (!Number.isInteger(from) || !Number.isInteger(to)) return null;
+    if (from < 1 || to < 1 || from > this.upcoming.length || to > this.upcoming.length) return null;
+    const [track] = this.upcoming.splice(from - 1, 1);
+    this.upcoming.splice(to - 1, 0, track);
+    return track;
+  }
+
+  shuffle() {
+    for (let index = this.upcoming.length - 1; index > 0; index -= 1) {
+      const swap = Math.floor(Math.random() * (index + 1));
+      const current = this.upcoming[index];
+      this.upcoming[index] = this.upcoming[swap];
+      this.upcoming[swap] = current;
+    }
+    return this.upcoming.length;
+  }
+
   reset() {
     this.upcoming = [];
     this.history = [];
     this.current = null;
+    this.loopMode = 'off';
     this.rememberCurrent = true;
   }
 }

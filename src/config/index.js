@@ -53,7 +53,7 @@ function loadConfig() {
     console.error('OWNER_ID must be a Discord user id, or left empty.');
     process.exit(1);
   }
-  const providerOrder = (readEnv('PROVIDER_ORDER') || 'local,soundcloud')
+  const providerOrder = (readEnv('PROVIDER_ORDER') || 'local,soundcloud,lavalink')
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean);
@@ -79,6 +79,8 @@ function loadConfig() {
     localMusicDir: path.resolve(root, readEnv('LOCAL_MUSIC_DIR') || 'music'),
     databasePath: path.resolve(root, readEnv('DATABASE_PATH') || 'data/bot.sqlite'),
     providerOrder,
+    idleMinutes: Math.max(0, integer('IDLE_MINUTES', 10)),
+    uptimeUrl: readEnv('UPTIME_URL'),
   };
 }
 

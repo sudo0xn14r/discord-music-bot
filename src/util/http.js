@@ -54,15 +54,17 @@ function stripSecrets(value) {
   return url.toString();
 }
 
-function assertPublicHttps(value) {
+function assertPublicUrl(value, { httpsOnly = false } = {}) {
   let url;
   try {
     url = new URL(value);
   } catch {
     throw new HttpError('The stream URL was not usable.', 502);
   }
-  if (url.protocol !== 'https:') {
-    throw new HttpError('The stream URL was not a public https link.', 502);
+  const https = url.protocol === 'https:';
+  const http = url.protocol === 'http:';
+  if (!https && (httpsOnly || !http)) {
+    throw new HttpError('The stream URL was not a public http link.', 502);
   }
   const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (
@@ -74,6 +76,10 @@ function assertPublicHttps(value) {
     throw new HttpError('The stream URL did not point at a public host.', 502);
   }
   return stripSecrets(url.toString());
+}
+
+function assertPublicHttps(value) {
+  return assertPublicUrl(value, { httpsOnly: true });
 }
 
 async function resolveAudioUrl(url, headers) {
@@ -135,5 +141,6 @@ module.exports = {
   fetchJson,
   resolveAudioUrl,
   assertPublicHttps,
+  assertPublicUrl,
   friendlyProviderError,
 };

@@ -2,7 +2,7 @@
   "name": "discord-music-bot",
   "version": "2.0.0",
   "private": true,
-  "description": "Friends-only Discord music bot. Lavalink plays authorized local and SoundCloud audio. Spotify links are metadata only.",
+  "description": "Friends-only Discord music bot. Lavalink plays local files and no-login links. Spotify, Apple Music, and Deezer are metadata only.",
   "engines": {
     "node": ">=22.13"
   },

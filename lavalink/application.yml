@@ -12,23 +12,29 @@ server: # REST and WS server
     enabled: false
 
 lavalink:
-  plugins: []
+  plugins:
+    - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
+      repository: "https://maven.lavalink.dev/releases"
+    - dependency: "com.github.Lochis.soundy:plugin:1.1.0"
+      repository: "https://jitpack.io"
   server:
     password: "changeme"
     sources:
       youtube: false
-      bandcamp: false
+      bandcamp: true
+      # Lavalink's built-in SoundCloud source cannot read current SoundCloud streams.
+      # The soundy plugin above provides SoundCloud links and scsearch without a login.
       soundcloud: false
-      twitch: false
-      vimeo: false
+      twitch: true
+      vimeo: true
       nico: false
       http: true
       local: true
     filters:
       volume: true
-      equalizer: false
+      equalizer: true
       karaoke: false
-      timescale: false
+      timescale: true
       tremolo: false
       vibrato: false
       distortion: false
@@ -44,13 +50,36 @@ lavalink:
     youtubePlaylistLoadLimit: 6
     playerUpdateInterval: 5
     youtubeSearchEnabled: false
-    soundcloudSearchEnabled: false
+    soundcloudSearchEnabled: true
     soundcloudFilterOutPreviewTracks: true
     gc-warnings: true
     timeouts:
       connectTimeoutMs: 10000
       connectionRequestTimeoutMs: 10000
       socketTimeoutMs: 15000
+
+plugins:
+  soundy:
+    enabled: true
+  lavasrc:
+    providers:
+      - "scsearch:%QUERY%"
+    sources:
+      spotify: true
+      applemusic: false
+      deezer: false
+      youtube: false
+      ytdlp: false
+    lyrics-sources:
+      spotify: false
+      deezer: false
+      youtube: false
+    spotify:
+      clientId: "${SPOTIFY_CLIENT_ID:}"
+      clientSecret: "${SPOTIFY_CLIENT_SECRET:}"
+      countryCode: "US"
+      playlistLoadLimit: 1
+      albumLoadLimit: 1
 
 metrics:
   prometheus:

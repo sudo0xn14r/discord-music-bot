@@ -1,3 +1,5 @@
+const { log } = require('../util/log');
+
 function bindPlayerEvents(player, session) {
   if (player.boundGuildPlayback) return;
   player.boundGuildPlayback = true;
@@ -9,27 +11,26 @@ function bindPlayerEvents(player, session) {
       if (started === -1 || session.playGeneration !== started) return;
       if (event.reason !== 'finished' && event.reason !== 'loadFailed') return;
       session.playGeneration = -1;
-      const failed = event.reason === 'loadFailed' ? session.queue.current : null;
-      if (failed) {
-        console.error(`[player:${session.guildId}] load failed for ${failed.title}`);
-      }
-      session.queue.shiftNext();
-      const outcome = await session.playCurrent(session.generation);
-      const notes = [];
-      if (failed) notes.push(`Couldn't play **${session.displayTitle(failed)}**: that audio is unavailable.`);
-      notes.push(...session.skippedNotes(outcome));
-      if (!session.queue.current) notes.push('The queue has finished.');
-      await session.refreshPanel(notes.filter(Boolean).join('\n') || null);
+      await session.advanceAfter(event.reason);
     });
   });
 
   player.on('exception', (event) => {
-    const message = event?.exception?.message || 'unknown playback error';
-    console.error(`[player:${session.guildId}] track exception: ${message}`);
+    log('error', 'playback failed', {
+      guildId: session.guildId,
+      source: session.queue.current?.source,
+      error: event?.exception?.message || 'unknown playback error',
+      node: session.manager.lavalink?.getIdealNode?.()?.name,
+    });
   });
 
   player.on('stuck', () => {
-    console.error(`[player:${session.guildId}] track stuck`);
+    log('error', 'playback failed', {
+      guildId: session.guildId,
+      source: session.queue.current?.source,
+      error: 'track stuck',
+      node: session.manager.lavalink?.getIdealNode?.()?.name,
+    });
     session.enqueue(async () => {
       if (session.leaving) return;
       const failed = session.queue.current;
@@ -38,7 +39,12 @@ function bindPlayerEvents(player, session) {
       try {
         await player.stopTrack();
       } catch (error) {
-        console.error(`[player:${session.guildId}] stop after stuck failed: ${error.message}`);
+        log('error', 'playback failed', {
+          guildId: session.guildId,
+          source: failed?.source,
+          error: error.message,
+          node: session.manager.lavalink?.getIdealNode?.()?.name,
+        });
       }
       session.queue.shiftNext();
       const outcome = await session.playCurrent(session.generation);
@@ -49,11 +55,12 @@ function bindPlayerEvents(player, session) {
   });
 
   player.on('update', (data) => {
-    if (typeof data?.state?.position === 'number') session.positionMs = data.state.position;
+    if (typeof data?.state?.position === 'number') session.notePosition(data.state.position);
   });
 
   player.on('start', (event) => {
-    session.positionMs = 0;
+    session.positionMs = session.pendingSeekMs || 0;
+    session.pendingSeekMs = 0;
     const length = event?.track?.info?.length;
     if (session.queue.current && Number.isFinite(length) && length > 0) {
       session.queue.current.durationMs = length;
@@ -62,8 +69,12 @@ function bindPlayerEvents(player, session) {
   });
 
   player.on('closed', (event) => {
-    const reason = event?.reason ? ` ${event.reason}` : '';
-    console.error(`[player:${session.guildId}] voice closed (${event?.code ?? 'unknown'}${reason})`);
+    log('error', 'voice closed', {
+      guildId: session.guildId,
+      source: session.queue.current?.source,
+      error: `${event?.code ?? 'unknown'}${event?.reason ? ` ${event.reason}` : ''}`,
+      node: session.manager.lavalink?.getIdealNode?.()?.name,
+    });
   });
 }
 

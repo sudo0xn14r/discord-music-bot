@@ -24,15 +24,21 @@ const client = new Client({
 });
 
 const lavalink = createLavalink(client, config);
-const providers = new ProviderManager(config);
-const music = new MusicManager({ client, lavalink, database, providers });
+const providers = new ProviderManager(config, () => lavalink.getIdealNode());
+const music = new MusicManager({ client, lavalink, database, providers, config });
 attachInteractions(client, music);
 const stopHealth = startHealth({ lavalink, client, config });
 let shuttingDown = false;
 
+lavalink.on('ready', () => {
+  music.restoreAll();
+});
+
 client.once(Events.ClientReady, async (readyClient) => {
   console.log(`Logged in as ${readyClient.user.tag}.`);
   for (const line of providers.describe()) console.log(`[provider] ${line}`);
+  music.startIdleWatch();
+  music.restoreAll();
   try {
     await registerCommands(readyClient.application.id);
   } catch (error) {
@@ -77,6 +83,7 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`Shutting down (${signal}).`);
+  music.stopIdleWatch();
   const timer = setTimeout(() => process.exit(0), 5000);
   timer.unref?.();
   Promise.resolve()

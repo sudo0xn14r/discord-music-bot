@@ -1,20 +1,23 @@
 const { queryMatches } = require('./match');
+const { AppleProvider } = require('./apple');
+const { DeezerProvider } = require('./deezer');
+const { LavalinkSource } = require('./lavalink-source');
 const { LocalLibrary } = require('./local-library');
 const { SoundCloudProvider } = require('./soundcloud');
 const { SpotifyProvider } = require('./spotify');
 
-const PLAYBACK_PROVIDERS = new Set(['local', 'soundcloud']);
+const PLAYBACK_PROVIDERS = new Set(['local', 'soundcloud', 'lavalink']);
 
 class ProviderManager {
-  constructor(config) {
-    this.order = config.providerOrder.filter((name) => name !== 'spotify');
+  constructor(config, getNode = () => null) {
+    this.order = config.providerOrder.filter((name) => !['spotify', 'apple', 'deezer'].includes(name));
     for (const name of config.providerOrder) {
-      if (name === 'spotify') {
-        console.warn('Spotify is metadata only. It turns on when SPOTIFY_CLIENT_ID and SPOTIFY_CLIENT_SECRET are set, not through PROVIDER_ORDER.');
+      if (name === 'spotify' || name === 'apple' || name === 'deezer') {
+        console.warn(`${name} is metadata only. Playback comes from the local library or SoundCloud.`);
         continue;
       }
       if (!PLAYBACK_PROVIDERS.has(name)) {
-        console.warn(`Unknown provider "${name}" in PROVIDER_ORDER. Expected local or soundcloud.`);
+        console.warn(`Unknown provider "${name}" in PROVIDER_ORDER. Expected local, soundcloud, or lavalink.`);
       }
     }
     this.providers = new Map();
@@ -28,6 +31,9 @@ class ProviderManager {
       enabled: this.order.includes('soundcloud'),
     }));
     this.register(new SpotifyProvider(config));
+    this.register(new AppleProvider());
+    this.register(new DeezerProvider());
+    this.register(new LavalinkSource(getNode, this.order.includes('lavalink')));
   }
 
   static fromList(list, order) {

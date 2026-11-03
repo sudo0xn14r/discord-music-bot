@@ -130,7 +130,7 @@ test('youtube links are refused before any provider is asked', async () => {
   ], ['local']);
   await assert.rejects(
     () => resolveRequest('https://youtu.be/dQw4w9WgXcQ', 'Nizar', 1, manager),
-    (error) => error instanceof UserError && error.message === 'YouTube playback is not supported.',
+    (error) => error instanceof UserError && error.message === "YouTube isn't supported here, try a SoundCloud link or /play a song name",
   );
   assert.equal(called, false);
 });

@@ -1,3 +1,5 @@
+const { log } = require('../util/log');
+
 const HOUR_MS = 60 * 60 * 1000;
 
 function startHealth({ lavalink, client, config }) {
@@ -10,21 +12,35 @@ function startHealth({ lavalink, client, config }) {
   timer.unref?.();
 
   async function check() {
+    await pingUptime();
     const node = lavalink.getIdealNode();
     if (!node) {
-      if (lastState !== 'down') console.error('[lavalink] node is not connected');
+      if (lastState !== 'down') log('error', 'node is not connected', { source: 'lavalink' });
       lastState = 'down';
       await alertOwner('The audio server is disconnected. The bot is still online and will keep retrying.');
       return;
     }
     try {
       await node.rest.getLavalinkInfo();
-      if (lastState !== 'up') console.log('[lavalink] node is healthy');
+      if (lastState !== 'up') log('info', 'node is healthy', { source: 'lavalink', node: node.name });
       lastState = 'up';
     } catch (error) {
-      console.error(`[lavalink] health check failed: ${error.message}`);
+      log('error', 'health check failed', { source: 'lavalink', node: node.name, error: error.message });
       if (lastState !== 'unhealthy') await alertOwner('The audio server failed a health check. Playback may be interrupted.');
       lastState = 'unhealthy';
+    }
+  }
+
+  async function pingUptime() {
+    if (!config.uptimeUrl) return;
+    try {
+      const response = await fetch(config.uptimeUrl, {
+        method: 'GET',
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!response.ok) log('error', 'uptime ping failed', { status: response.status });
+    } catch (error) {
+      log('error', 'uptime ping failed', { error: error.message });
     }
   }
 
@@ -36,7 +52,7 @@ function startHealth({ lavalink, client, config }) {
       const user = await client.users.fetch(config.ownerId);
       await user.send(text);
     } catch (error) {
-      console.error(`[health] could not message the owner: ${error.message}`);
+      log('error', 'could not message the owner', { error: error.message });
     }
   }
 

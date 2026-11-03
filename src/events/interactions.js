@@ -7,7 +7,9 @@ function attachInteractions(client, music) {
 
   client.on(Events.InteractionCreate, async (interaction) => {
     try {
-      if (interaction.isButton() && interaction.customId.startsWith('player:')) {
+      if (interaction.isButton() && (
+        interaction.customId.startsWith('player:') || interaction.customId.startsWith('queue:')
+      )) {
         await executeButton(interaction, music);
         return;
       }
@@ -41,6 +43,7 @@ async function sendButtonError(interaction, message) {
 
 async function sendInteractionError(interaction, message) {
   const payload = { content: message, allowedMentions: { parse: [] } };
+  if (!interaction.deferred && !interaction.replied) payload.flags = MessageFlags.Ephemeral;
   try {
     if (interaction.deferred || interaction.replied) await interaction.editReply(payload);
     else await interaction.reply(payload);

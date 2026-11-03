@@ -1,10 +1,10 @@
-const { InteractionContextType, SlashCommandBuilder } = require('discord.js');
+const { InteractionContextType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { UserError } = require('../errors');
 const { formatTrackLength, oneLine } = require('../format');
 const { createTrack } = require('../music/track');
 const { MAX_QUEUE } = require('../music/queue');
 const { resolveRequest } = require('../music/resolver');
-const { playerMessage } = require('../panel');
+const { playerMessage, queueMessage } = require('../panel');
 
 function guildOnly(builder) {
   return builder.setContexts(InteractionContextType.Guild);
@@ -18,13 +18,13 @@ const queryOption = (description) => (option) => option
 
 const play = guildOnly(new SlashCommandBuilder())
   .setName('play')
-  .setDescription('Play a song name, a SoundCloud link, or a Spotify link')
-  .addStringOption(queryOption('Song name, SoundCloud link, or Spotify link'));
+  .setDescription('Play a song name or a SoundCloud, Bandcamp, Spotify, Apple, or Deezer link')
+  .addStringOption(queryOption('Song name or a supported link'));
 
 const playnow = guildOnly(new SlashCommandBuilder())
   .setName('playnow')
   .setDescription('Interrupt the current song and play this instead')
-  .addStringOption(queryOption('Song name, SoundCloud link, or Spotify link'));
+  .addStringOption(queryOption('Song name or a supported link'));
 
 const pause = guildOnly(new SlashCommandBuilder())
   .setName('pause')
@@ -103,6 +103,79 @@ const history = guildOnly(new SlashCommandBuilder())
   .setName('history')
   .setDescription('Show songs this server played recently');
 
+const seek = guildOnly(new SlashCommandBuilder())
+  .setName('seek')
+  .setDescription('Jump to a time in the current track')
+  .addStringOption((option) => option
+    .setName('position')
+    .setDescription('Seconds, or a timestamp like 1:30')
+    .setRequired(true)
+    .setMaxLength(12));
+
+const loop = guildOnly(new SlashCommandBuilder())
+  .setName('loop')
+  .setDescription('Repeat the current track or the whole queue')
+  .addStringOption((option) => option
+    .setName('mode')
+    .setDescription('What to loop')
+    .setRequired(true)
+    .addChoices(
+      { name: 'Off', value: 'off' },
+      { name: 'Track', value: 'track' },
+      { name: 'Queue', value: 'queue' },
+    ));
+
+const shuffle = guildOnly(new SlashCommandBuilder())
+  .setName('shuffle')
+  .setDescription('Shuffle the upcoming songs');
+
+const move = guildOnly(new SlashCommandBuilder())
+  .setName('move')
+  .setDescription('Move a queued song to another position')
+  .addIntegerOption((option) => option
+    .setName('from')
+    .setDescription('Current position in the queue')
+    .setRequired(true)
+    .setMinValue(1)
+    .setMaxValue(MAX_QUEUE))
+  .addIntegerOption((option) => option
+    .setName('to')
+    .setDescription('New position in the queue')
+    .setRequired(true)
+    .setMinValue(1)
+    .setMaxValue(MAX_QUEUE));
+
+const remove = guildOnly(new SlashCommandBuilder())
+  .setName('remove')
+  .setDescription('Remove a song from the queue')
+  .addIntegerOption((option) => option
+    .setName('position')
+    .setDescription('Position in the queue')
+    .setRequired(true)
+    .setMinValue(1)
+    .setMaxValue(MAX_QUEUE));
+
+const filter = guildOnly(new SlashCommandBuilder())
+  .setName('filter')
+  .setDescription('Apply a playback filter')
+  .addStringOption((option) => option
+    .setName('name')
+    .setDescription('Filter')
+    .setRequired(true)
+    .addChoices(
+      { name: 'Off', value: 'off' },
+      { name: 'Bass boost', value: 'bassboost' },
+      { name: 'Nightcore', value: 'nightcore' },
+    ));
+
+const djrole = guildOnly(new SlashCommandBuilder())
+  .setName('djrole')
+  .setDescription('Limit queue controls to a role. Leave the role empty to clear it.')
+  .addRoleOption((option) => option
+    .setName('role')
+    .setDescription('Role that can control the queue')
+    .setRequired(false));
+
 function userVoice(interaction) {
   if (!interaction.inGuild() || !interaction.guild) {
     throw new UserError('This bot only works in a server.');
@@ -132,9 +205,44 @@ function playlistName(value) {
 }
 
 function matchNote(track) {
-  if (track?.matchedFrom !== 'spotify') return '';
+  const labels = { spotify: 'Spotify', apple: 'Apple Music', deezer: 'Deezer' };
+  const from = labels[track?.matchedFrom];
+  if (!from) return '';
   const where = track.source === 'local' ? 'the local library' : 'SoundCloud';
-  return `Matched the Spotify metadata to ${where}. Spotify audio is not streamed.`;
+  return `Matched the ${from} metadata to ${where}. ${from} audio is not streamed.`;
+}
+
+function hasPermission(member, flag) {
+  const permissions = member?.permissions;
+  if (!permissions || typeof permissions.has !== 'function') return false;
+  return permissions.has(flag);
+}
+
+function memberHasRole(member, roleId) {
+  if (!member || !roleId) return false;
+  if (member.roles?.cache?.has?.(roleId)) return true;
+  if (Array.isArray(member.roles)) return member.roles.includes(roleId);
+  return false;
+}
+
+function requireControl(interaction, music) {
+  const roleId = music.database.getGuild(interaction.guildId)?.djRoleId;
+  if (!roleId) return;
+  if (hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) return;
+  if (memberHasRole(interaction.member, roleId)) return;
+  throw new UserError('Only a DJ can do that in this server.');
+}
+
+function parseSeek(value) {
+  const text = String(value || '').trim();
+  if (/^\d+$/.test(text)) return Number(text) * 1000;
+  const parts = text.split(':').map((part) => Number(part));
+  if (parts.length < 2 || parts.length > 3) return null;
+  if (parts.some((part) => !Number.isInteger(part) || part < 0)) return null;
+  if (parts.length === 2 && parts[1] > 59) return null;
+  if (parts.length === 3 && (parts[1] > 59 || parts[2] > 59)) return null;
+  if (parts.length === 2) return ((parts[0] * 60) + parts[1]) * 1000;
+  return ((parts[0] * 3600) + (parts[1] * 60) + parts[2]) * 1000;
 }
 
 function describeAdd(result, notice) {
@@ -165,6 +273,7 @@ function describeAdd(result, notice) {
 }
 
 async function executePlay(interaction, music, { now = false } = {}) {
+  if (now) requireControl(interaction, music);
   const voice = userVoice(interaction);
   const existing = music.peek(interaction.guildId);
   if (existing?.channelId && existing.channelId !== voice.id) {
@@ -222,12 +331,14 @@ async function executeSkip(interaction, music) {
 
 async function executeStop(interaction, music) {
   const session = activeSession(interaction, music);
+  requireControl(interaction, music);
   const text = await session.stop();
   await session.refreshPanel(text);
   return interaction.reply(text);
 }
 
 async function executeLeave(interaction, music) {
+  requireControl(interaction, music);
   const voice = userVoice(interaction);
   const session = music.peek(interaction.guildId);
   if (!session?.channelId) throw new UserError("I'm not in a voice channel.");
@@ -239,6 +350,7 @@ async function executeLeave(interaction, music) {
 
 async function executeClear(interaction, music) {
   const session = activeSession(interaction, music);
+  requireControl(interaction, music);
   const count = session.clearUpcoming();
   if (!count) throw new UserError('The queue is already empty.');
   const text = `Cleared ${count} song${count === 1 ? '' : 's'} from the queue.`;
@@ -251,8 +363,7 @@ async function executeQueue(interaction, music) {
   if (!session.current && session.upcoming.length === 0) {
     throw new UserError('Nothing is playing and the queue is empty.');
   }
-  const message = await interaction.reply({ ...playerMessage(session), fetchReply: true });
-  session.notePanel(message);
+  return interaction.reply(queueMessage(session, 0));
 }
 
 async function executeNowPlaying(interaction, music) {
@@ -263,6 +374,7 @@ async function executeNowPlaying(interaction, music) {
 }
 
 async function executeVolume(interaction, music) {
+  requireControl(interaction, music);
   const existing = music.peek(interaction.guildId);
   if (existing?.channelId) sameChannel(interaction, existing);
   const session = music.session(interaction.guildId);
@@ -276,6 +388,73 @@ async function executeHistory(interaction, music) {
   if (!rows.length) return interaction.reply('No songs have been played here yet.');
   const lines = rows.map((row, index) => `${index + 1}. ${oneLine(row.title)} — ${oneLine(row.artist)}`);
   return interaction.reply({ content: lines.join('\n').slice(0, 2000), allowedMentions: { parse: [] } });
+}
+
+async function replyWithPanel(interaction, session, text) {
+  const message = await interaction.reply({ ...playerMessage(session, text), fetchReply: true });
+  session.notePanel(message);
+}
+
+async function executeSeek(interaction, music) {
+  const session = activeSession(interaction, music);
+  requireControl(interaction, music);
+  const position = parseSeek(interaction.options.getString('position', true));
+  if (position == null) throw new UserError('Use seconds or a timestamp like 1:30.');
+  const text = await session.seek(position);
+  return replyWithPanel(interaction, session, text);
+}
+
+async function executeLoop(interaction, music) {
+  const session = activeSession(interaction, music);
+  requireControl(interaction, music);
+  const text = await session.setLoop(interaction.options.getString('mode', true));
+  return replyWithPanel(interaction, session, text);
+}
+
+async function executeShuffle(interaction, music) {
+  const session = activeSession(interaction, music);
+  requireControl(interaction, music);
+  const text = await session.shuffleUpcoming();
+  return replyWithPanel(interaction, session, text);
+}
+
+async function executeMove(interaction, music) {
+  const session = activeSession(interaction, music);
+  requireControl(interaction, music);
+  const text = await session.moveUpcoming(
+    interaction.options.getInteger('from', true),
+    interaction.options.getInteger('to', true),
+  );
+  await session.refreshPanel(text);
+  return interaction.reply(text);
+}
+
+async function executeRemove(interaction, music) {
+  const session = activeSession(interaction, music);
+  requireControl(interaction, music);
+  const text = await session.removeUpcoming(interaction.options.getInteger('position', true));
+  await session.refreshPanel(text);
+  return interaction.reply(text);
+}
+
+async function executeFilter(interaction, music) {
+  const session = activeSession(interaction, music);
+  requireControl(interaction, music);
+  const text = await session.setFilter(interaction.options.getString('name', true));
+  return replyWithPanel(interaction, session, text);
+}
+
+async function executeDjRole(interaction, music) {
+  if (!interaction.inGuild()) throw new UserError('This bot only works in a server.');
+  if (!hasPermission(interaction.member, PermissionFlagsBits.ManageGuild)) {
+    throw new UserError('You need the Manage Server permission to change the DJ role.');
+  }
+  const role = interaction.options.getRole('role');
+  music.database.setDjRole(interaction.guildId, role ? role.id : null);
+  const content = role
+    ? `DJ role set to ${oneLine(role.name)}. Anyone can still play, pause, and skip. Other controls need that role or Manage Server.`
+    : 'DJ role cleared. Anyone in the voice channel can control playback.';
+  return interaction.reply({ content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
 }
 
 async function executePlaylist(interaction, music) {
@@ -312,6 +491,18 @@ async function executePlaylist(interaction, music) {
   const tracks = [];
   let missing = 0;
   for (const row of saved.tracks) {
+    if (row.source === 'lavalink') {
+      if (!row.identifier && !row.pageUrl) {
+        missing += 1;
+        continue;
+      }
+      tracks.push(createTrack({
+        ...row,
+        requester,
+        identifier: row.identifier || row.pageUrl,
+      }));
+      continue;
+    }
     if (row.source !== 'local' && row.source !== 'soundcloud') {
       missing += 1;
       continue;
@@ -357,9 +548,29 @@ async function executeButton(interaction, music) {
     return;
   }
   if (action === 'player:stop') {
+    requireControl(interaction, music);
     await interaction.deferUpdate();
     const text = await session.stop();
     await session.refreshPanel(text);
+    return;
+  }
+  if (action === 'player:loop') {
+    requireControl(interaction, music);
+    const order = ['off', 'track', 'queue'];
+    const next = order[(order.indexOf(session.queue.loopMode) + 1) % order.length];
+    const text = await session.setLoop(next);
+    await interaction.update(playerMessage(session, text));
+    return;
+  }
+  if (action === 'player:shuffle') {
+    requireControl(interaction, music);
+    const text = await session.shuffleUpcoming();
+    await interaction.update(playerMessage(session, text));
+    return;
+  }
+  if (action.startsWith('queue:')) {
+    const page = Number(action.slice('queue:'.length));
+    await interaction.update(queueMessage(session, Number.isInteger(page) ? page : 0));
     return;
   }
   if (action === 'player:next') {
@@ -399,6 +610,13 @@ const commands = [
   { data: volume, execute: executeVolume },
   { data: playlist, execute: executePlaylist },
   { data: history, execute: executeHistory },
+  { data: seek, execute: executeSeek },
+  { data: loop, execute: executeLoop },
+  { data: shuffle, execute: executeShuffle },
+  { data: move, execute: executeMove },
+  { data: remove, execute: executeRemove },
+  { data: filter, execute: executeFilter },
+  { data: djrole, execute: executeDjRole },
 ];
 
 module.exports = { commands, executeButton };

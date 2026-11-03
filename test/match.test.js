@@ -2,11 +2,14 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   isYouTubeUrl,
+  linkKind,
   pickBestMatch,
   queryMatches,
   spotifyTarget,
   titlesMatch,
 } = require('../src/providers/match');
+const { appleTarget } = require('../src/providers/apple');
+const { deezerTarget } = require('../src/providers/deezer');
 
 test('youtube links are recognized and other hosts are not', () => {
   assert.equal(isYouTubeUrl('https://www.youtube.com/watch?v=abc'), true);
@@ -24,6 +27,21 @@ test('spotify targets keep the id from urls and uris', () => {
   );
   assert.deepEqual(spotifyTarget('spotify:album:xyz789'), { type: 'album', id: 'xyz789' });
   assert.equal(spotifyTarget('https://example.com/track/abc'), null);
+});
+
+test('no-login links are classified and catalog links stay metadata', () => {
+  assert.equal(linkKind('https://artist.bandcamp.com/track/song'), 'bandcamp');
+  assert.equal(linkKind('https://www.twitch.tv/videos/123'), 'twitch');
+  assert.equal(linkKind('https://vimeo.com/123'), 'vimeo');
+  assert.equal(linkKind('https://example.com/live.mp3'), 'http');
+  assert.equal(linkKind('https://youtu.be/abc'), 'youtube');
+  assert.equal(linkKind('https://music.apple.com/us/song/name/555'), 'apple');
+  assert.equal(linkKind('https://www.deezer.com/track/123'), 'deezer');
+  assert.deepEqual(
+    appleTarget('https://music.apple.com/us/album/album-name/123456?i=789'),
+    { type: 'track', id: '789' },
+  );
+  assert.deepEqual(deezerTarget('https://www.deezer.com/album/456'), { type: 'album', id: '456' });
 });
 
 test('title matching rejects a different song', () => {

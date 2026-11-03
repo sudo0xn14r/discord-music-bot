@@ -1,3 +1,5 @@
+const YOUTUBE_MESSAGE = "YouTube isn't supported here, try a SoundCloud link or /play a song name";
+
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
   'youtu.be',
@@ -34,6 +36,50 @@ function isSoundCloudUrl(value) {
   if (!isHttpUrl(value)) return false;
   const host = hostOf(value);
   return host === 'soundcloud.com' || host === 'm.soundcloud.com' || host === 'on.soundcloud.com';
+}
+
+function isBandcampUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  const host = hostOf(value);
+  return host === 'bandcamp.com' || host.endsWith('.bandcamp.com');
+}
+
+function isTwitchUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  const host = hostOf(value);
+  return host === 'twitch.tv' || host.endsWith('.twitch.tv');
+}
+
+function isVimeoUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  const host = hostOf(value);
+  return host === 'vimeo.com' || host === 'player.vimeo.com';
+}
+
+function isAppleMusicUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  const host = hostOf(value);
+  return host === 'music.apple.com' || host === 'geo.music.apple.com' || host.endsWith('.music.apple.com');
+}
+
+function isDeezerUrl(value) {
+  if (!isHttpUrl(value)) return false;
+  const host = hostOf(value);
+  return host === 'deezer.com' || host.endsWith('.deezer.com');
+}
+
+function linkKind(input) {
+  const value = String(input || '').trim();
+  if (isYouTubeUrl(value)) return 'youtube';
+  if (isSpotifyUrl(value) || /^spotify:(track|album|playlist|episode):/i.test(value)) return 'spotify';
+  if (isAppleMusicUrl(value)) return 'apple';
+  if (isDeezerUrl(value)) return 'deezer';
+  if (isSoundCloudUrl(value)) return 'soundcloud';
+  if (isBandcampUrl(value)) return 'bandcamp';
+  if (isTwitchUrl(value)) return 'twitch';
+  if (isVimeoUrl(value)) return 'vimeo';
+  if (isHttpUrl(value)) return 'http';
+  return 'text';
 }
 
 function normalize(value) {
@@ -123,9 +169,16 @@ function spotifyTarget(input) {
 
 module.exports = {
   isHttpUrl,
+  YOUTUBE_MESSAGE,
   isYouTubeUrl,
   isSpotifyUrl,
   isSoundCloudUrl,
+  isBandcampUrl,
+  isTwitchUrl,
+  isVimeoUrl,
+  isAppleMusicUrl,
+  isDeezerUrl,
+  linkKind,
   normalize,
   titlesMatch,
   queryMatches,

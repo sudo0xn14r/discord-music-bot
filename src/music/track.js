@@ -18,6 +18,7 @@ function createTrack(fields) {
     pageUrl: fields.pageUrl || null,
     filePath: fields.filePath || null,
     soundcloudId: fields.soundcloudId ? String(fields.soundcloudId) : null,
+    identifier: fields.identifier || null,
     matchedFrom: fields.matchedFrom || null,
   };
 }
