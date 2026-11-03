@@ -1,4 +1,4 @@
-const { EmbedBuilder, InteractionContextType, SlashCommandBuilder } = require('discord.js');
+const { EmbedBuilder, InteractionContextType, MessageFlags, SlashCommandBuilder } = require('discord.js');
 const { UserError } = require('./errors');
 const { formatDuration, oneLine } = require('./format');
 const { matchNote, resolveTracks } = require('./media');
@@ -91,7 +91,10 @@ async function executePlay(interaction, player) {
   session.bindTextChannel(interaction.channelId);
   await session.join(voice);
   const result = session.enqueueAll(tracks);
-  await interaction.editReply(describeAdd(result));
+  await interaction.editReply({
+    content: describeAdd(result),
+    flags: MessageFlags.SuppressEmbeds,
+  });
 }
 
 function describeAdd(result) {

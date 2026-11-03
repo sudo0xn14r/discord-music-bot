@@ -522,48 +522,86 @@ function matchNote(track) {
   return '';
 }
 
+function killChild(child) {
+  if (!child?.pid || child.exitCode != null) return;
+  try {
+    process.kill(child.pid, 'SIGKILL');
+  } catch {
+    // Already gone.
+  }
+}
+
 function openAudioStream(url) {
   const binary = requireBinary();
-  const args = [
+  const ffmpeg = ffmpegBinary();
+  if (!ffmpeg) {
+    throw new UserError('ffmpeg is not installed. Install it on the VPS so audio can be played.');
+  }
+
+  // YouTube audio is usually WebM. Streamed WebM does not play in Discord voice.
+  // ffmpeg turns whatever yt-dlp downloads into an Ogg Opus stream Discord can send.
+  const ytdlp = spawn(binary, [
     '--no-warnings',
     '--quiet',
     '--no-progress',
     '--no-playlist',
     '--no-cache-dir',
-    '-f', 'bestaudio[acodec=opus]/bestaudio/best',
+    '-f', 'bestaudio/best',
     '-o', '-',
     ...cookieArgs(),
+    '--ffmpeg-location', ffmpeg,
     '--',
     url,
-  ];
-  const ffmpeg = ffmpegBinary();
-  if (ffmpeg) {
-    args.splice(args.length - 2, 0, '--ffmpeg-location', ffmpeg);
-  }
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
-  const child = spawn(binary, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const transcoder = spawn(ffmpeg, [
+    '-hide_banner',
+    '-loglevel', 'error',
+    '-i', 'pipe:0',
+    '-vn',
+    '-acodec', 'libopus',
+    '-b:a', '128k',
+    '-ar', '48000',
+    '-ac', '2',
+    '-application', 'audio',
+    '-f', 'opus',
+    'pipe:1',
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
   let stderr = '';
-  child.stderr.on('data', (chunk) => {
+  const collect = (chunk) => {
     stderr += chunk.toString();
     if (stderr.length > 8000) stderr = stderr.slice(-8000);
-  });
-  child.on('error', () => {});
+  };
+  ytdlp.stderr.on('data', collect);
+  transcoder.stderr.on('data', collect);
+  ytdlp.on('error', () => {});
+  transcoder.on('error', () => {});
+  ytdlp.stdout.on('error', () => {});
+  transcoder.stdin.on('error', () => {});
+  ytdlp.stdout.pipe(transcoder.stdin);
 
-  // Don't read stdout here. demuxProbe has to see the first bytes.
-  const timer = setTimeout(() => {
-    if (child.exitCode == null) child.kill('SIGKILL');
-  }, STREAM_START_TIMEOUT_MS);
+  const kill = () => {
+    killChild(ytdlp);
+    killChild(transcoder);
+  };
+  const timer = setTimeout(kill, STREAM_START_TIMEOUT_MS);
+  transcoder.on('close', () => killChild(ytdlp));
+  transcoder.kill = () => {
+    kill();
+    return true;
+  };
 
   return {
-    stream: child.stdout,
-    process: child,
+    stream: transcoder.stdout,
+    process: transcoder,
     stderr: () => stderr,
     clearStartTimeout() {
       clearTimeout(timer);
     },
     kill() {
       clearTimeout(timer);
-      if (child.exitCode == null && !child.killed) child.kill('SIGKILL');
+      kill();
     },
   };
 }
