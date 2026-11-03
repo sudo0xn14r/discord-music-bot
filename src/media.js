@@ -140,6 +140,12 @@ function commandWorks(command, args) {
   return probe.status === 0;
 }
 
+function youtubeArgs() {
+  const args = ['--extractor-args', 'youtube:player_client=tv,web_safari'];
+  if (commandWorks('node', ['-e', 'process.exit(0)'])) args.unshift('--js-runtimes', 'node');
+  return args;
+}
+
 function requireBinary() {
   if (cachedYtDlp) return cachedYtDlp;
   const explicit = (process.env.YTDLP_PATH || '').trim();
@@ -281,6 +287,7 @@ async function resolveWithYtDlp(target, requestedBy, { collection, limit, label 
       '--no-warnings',
       '--skip-download',
       '--no-cache-dir',
+      ...youtubeArgs(),
       '--flat-playlist',
       ...(asCollection ? ['--yes-playlist', '--playlist-end', String(limit)] : ['--no-playlist']),
       ...cookieArgs(),
@@ -546,6 +553,7 @@ function openAudioStream(url) {
     '--no-progress',
     '--no-playlist',
     '--no-cache-dir',
+    ...youtubeArgs(),
     '-f', 'bestaudio/best',
     '-o', '-',
     ...cookieArgs(),

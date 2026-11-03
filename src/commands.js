@@ -91,6 +91,15 @@ async function executePlay(interaction, player) {
   session.bindTextChannel(interaction.channelId);
   await session.join(voice);
   const result = session.enqueueAll(tracks);
+  const outcome = result.playback ? await result.playback : { ok: true };
+  if (outcome.dropped) {
+    await interaction.editReply('That play was interrupted.');
+    return;
+  }
+  if (!outcome.ok) {
+    await interaction.editReply(`Couldn't play **${oneLine(result.first.title)}**: ${outcome.reason}`);
+    return;
+  }
   await interaction.editReply({
     content: describeAdd(result),
     flags: MessageFlags.SuppressEmbeds,
@@ -102,7 +111,7 @@ function describeAdd(result) {
   const note = matchNote(track);
   const suffix = note ? `\n${note}` : '';
   if (result.added === 1 && result.started) {
-    return `Playing **${oneLine(track.title)}** (${formatDuration(track.duration)}).${suffix}\n${track.url}`;
+    return `Playing **${oneLine(track.title)}** (${formatDuration(track.duration)}).${suffix}`;
   }
   if (result.added === 1) {
     return `Added **${oneLine(track.title)}** to the queue at position ${result.position}.${suffix}`;

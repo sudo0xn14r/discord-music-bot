@@ -31,6 +31,7 @@ class GuildSession {
     this.playLock = false;
     this.advanceAfterLock = false;
     this.advanceAnnounce = true;
+    this.startFailure = null;
     this.player = createAudioPlayer();
 
     this.player.on('error', (error) => {
@@ -42,18 +43,23 @@ class GuildSession {
       this.consecutiveFailures = 0;
     });
 
+    this.player.on('stateChange', (oldState, newState) => {
+      console.log(`Player ${oldState.status} -> ${newState.status} in ${this.guildId}.`);
+    });
+
     this.player.on(AudioPlayerStatus.Idle, () => {
       const error = this.playbackError;
       this.playbackError = null;
       if (this.suppressAutoplay) return;
-      const failed = error ? this.current : null;
-      if (failed) {
-        void this.announce(`Couldn't play **${oneLine(failed.title)}**: ${shortError(error)}`);
-      }
       if (this.playLock) {
+        this.startFailure = error;
         this.advanceAfterLock = true;
         this.advanceAnnounce = true;
         return;
+      }
+      const failed = error ? this.current : null;
+      if (failed) {
+        void this.announce(`Couldn't play **${oneLine(failed.title)}**: ${shortError(error)}`);
       }
       void this.playNext({ announce: true });
     });
@@ -98,6 +104,9 @@ class GuildSession {
     }
 
     connection.subscribe(this.player);
+    connection.on('stateChange', (oldState, newState) => {
+      console.log(`Voice ${oldState.status} -> ${newState.status} in ${this.guildId}.`);
+    });
     this.watchConnection(connection);
   }
 
@@ -136,13 +145,14 @@ class GuildSession {
     const accepted = tracks.slice(0, room);
     const startNow = !this.current && this.player.state.status === AudioPlayerStatus.Idle;
     for (const track of accepted) this.tracks.push(track);
-    if (startNow) void this.playNext({ announce: false });
+    const playback = startNow ? this.playNext({ announce: false }) : null;
     return {
       started: startNow,
       added: accepted.length,
       skipped: tracks.length - accepted.length,
       first: accepted[0],
       position: startNow ? 0 : this.tracks.length - accepted.length + 1,
+      playback,
     };
   }
 
@@ -153,8 +163,9 @@ class GuildSession {
       return;
     }
     this.playLock = true;
+    let outcome = { ok: false, reason: 'Playback did not start.' };
     try {
-      await this.startTrack({ announce });
+      outcome = await this.startTrack({ announce });
     } finally {
       this.playLock = false;
       if (this.advanceAfterLock) {
@@ -163,6 +174,7 @@ class GuildSession {
         await this.playNext({ announce: nextAnnounce });
       }
     }
+    return outcome;
   }
 
   async startTrack({ announce }) {
@@ -170,49 +182,63 @@ class GuildSession {
     this.killProcess();
     const track = this.tracks.shift() || null;
     this.current = track;
-    if (!track) return;
+    if (!track) return { ok: true };
 
     let opened;
     try {
       await ensurePlayable(track);
-      if (generation !== this.generation) return;
+      if (generation !== this.generation) return { ok: false, dropped: true };
+      console.log(`Opening audio for ${track.url}`);
       opened = openAudioStream(track.url);
       this.process = opened.process;
       const probed = await demuxProbe(opened.stream);
       opened.clearStartTimeout();
       if (generation !== this.generation) {
         opened.kill();
-        return;
+        return { ok: false, dropped: true };
       }
+      console.log(`Probed ${track.url} as ${probed.type}.`);
       const resource = createAudioResource(probed.stream, { inputType: probed.type });
       this.process = opened.process;
       opened.process.once('close', () => {
         if (this.process === opened.process) this.process = null;
       });
       this.player.play(resource);
-      if (generation !== this.generation || this.player.state.status === AudioPlayerStatus.Idle) return;
+      await entersState(this.player, AudioPlayerStatus.Playing, 20_000);
+      if (generation !== this.generation) return { ok: false, dropped: true };
+      console.log(`Audio started for ${track.url}.`);
       if (announce) {
         const via = track.source === 'spotify' || track.source === 'deezer' || track.source === 'apple'
           ? ' (YouTube match)'
           : '';
         await this.announce(`Now playing **${oneLine(track.title)}** (${formatDuration(track.duration)})${via}.`);
       }
+      return { ok: true };
     } catch (error) {
       opened?.kill();
-      if (generation !== this.generation) return;
+      if (this.player.state.status !== AudioPlayerStatus.Idle) {
+        this.suppressAutoplay = true;
+        this.player.stop(true);
+        this.suppressAutoplay = false;
+      }
+      if (generation !== this.generation) return { ok: false, dropped: true };
       this.consecutiveFailures += 1;
-      const detail = opened ? friendlyYtError(opened.stderr(), null) : shortError(error);
+      const stderr = opened?.stderr() || '';
+      const detail = stderr ? friendlyYtError(stderr, null) : '';
       const reason = detail && !/^Couldn't open that \(yt-dlp/.test(detail) ? detail : shortError(error);
       console.error(`Failed to start ${track.url}: ${reason}`);
+      if (stderr.trim()) console.error(stderr.trim());
       await this.announce(`Couldn't play **${oneLine(track.title)}**: ${reason}`);
       this.current = null;
       if (this.consecutiveFailures >= MAX_FAILURES) {
         this.tracks = [];
+        this.advanceAfterLock = false;
         await this.announce(`Stopped after ${MAX_FAILURES} playback failures in a row.`);
-        return;
+        return { ok: false, reason };
       }
       this.advanceAfterLock = true;
       this.advanceAnnounce = true;
+      return { ok: false, reason };
     }
   }
 
