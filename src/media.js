@@ -188,6 +188,9 @@ function friendlyYtError(stderr, code) {
   if (/not a bot|cookies-from-browser|sign in to confirm/i.test(message)) {
     return 'YouTube blocked that request and asked for a sign-in check. Try again later, or set YTDLP_COOKIES to a cookies.txt file (see the README).';
   }
+  if (/403|forbidden/i.test(message)) {
+    return 'YouTube refused the download. Export a fresh cookies.txt and point YTDLP_COOKIES at it.';
+  }
   if (/age-restricted|age restricted|confirm your age/i.test(message)) {
     return 'That video is age-restricted and cannot be played.';
   }
@@ -537,41 +540,33 @@ function killChild(child) {
   }
 }
 
-async function directMediaUrl(url) {
-  const ffmpeg = ffmpegBinary();
-  const listed = await runYtDlp([
-    '-g',
-    '--no-warnings',
-    '--no-playlist',
-    '--no-cache-dir',
-    ...jsRuntimeArgs(),
-    '-f', 'bestaudio/best',
-    ...cookieArgs(),
-    ...(ffmpeg ? ['--ffmpeg-location', ffmpeg] : []),
-    '--',
-    url,
-  ], METADATA_TIMEOUT_MS);
-  const mediaUrl = listed.split(/\r?\n/).map((line) => line.trim()).find((line) => /^https?:\/\//i.test(line));
-  if (!mediaUrl) throw new UserError('I could not get an audio stream for that.');
-  return mediaUrl;
-}
-
-function openAudioStream(mediaUrl) {
+function openAudioStream(url) {
+  const binary = requireBinary();
   const ffmpeg = ffmpegBinary();
   if (!ffmpeg) {
     throw new UserError('ffmpeg is not installed. Install it on the VPS so audio can be played.');
   }
 
-  // Read the media URL directly. Piping yt-dlp's WebM into Discord ends immediately.
+  // yt-dlp must download the file itself. A bare media URL returns 403 when ffmpeg requests it.
+  const downloader = spawn(binary, [
+    '--no-warnings',
+    '--quiet',
+    '--no-progress',
+    '--no-playlist',
+    '--no-cache-dir',
+    ...jsRuntimeArgs(),
+    '-f', 'bestaudio/best',
+    '-o', '-',
+    ...cookieArgs(),
+    '--ffmpeg-location', ffmpeg,
+    '--',
+    url,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
   const transcoder = spawn(ffmpeg, [
     '-hide_banner',
     '-loglevel', 'error',
-    '-reconnect', '1',
-    '-reconnect_streamed', '1',
-    '-reconnect_delay_max', '5',
-    '-user_agent', 'Mozilla/5.0',
-    '-referer', 'https://www.youtube.com/',
-    '-i', mediaUrl,
+    '-i', 'pipe:0',
     '-vn',
     '-acodec', 'libopus',
     '-b:a', '128k',
@@ -580,17 +575,26 @@ function openAudioStream(mediaUrl) {
     '-application', 'audio',
     '-f', 'opus',
     'pipe:1',
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
   let stderr = '';
   const collect = (chunk) => {
     stderr += chunk.toString();
     if (stderr.length > 8000) stderr = stderr.slice(-8000);
   };
+  downloader.stderr.on('data', collect);
   transcoder.stderr.on('data', collect);
+  downloader.on('error', () => {});
   transcoder.on('error', () => {});
+  downloader.stdout.on('error', () => {});
+  transcoder.stdin.on('error', () => {});
+  downloader.stdout.pipe(transcoder.stdin);
+  transcoder.on('close', () => killChild(downloader));
 
-  const kill = () => killChild(transcoder);
+  const kill = () => {
+    killChild(downloader);
+    killChild(transcoder);
+  };
   const timer = setTimeout(kill, STREAM_START_TIMEOUT_MS);
   transcoder.kill = () => {
     kill();
@@ -615,7 +619,6 @@ module.exports = {
   classifyQuery,
   resolveTracks,
   ensurePlayable,
-  directMediaUrl,
   openAudioStream,
   friendlyYtError,
   matchNote,

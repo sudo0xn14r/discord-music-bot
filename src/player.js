@@ -9,7 +9,7 @@ const {
 } = require('@discordjs/voice');
 const { UserError } = require('./errors');
 const { formatDuration, oneLine, shortError } = require('./format');
-const { directMediaUrl, ensurePlayable, friendlyYtError, openAudioStream } = require('./media');
+const { ensurePlayable, friendlyYtError, openAudioStream } = require('./media');
 const { playerMessage } = require('./panel');
 
 const MAX_QUEUE = 50;
@@ -201,10 +201,8 @@ class GuildSession {
     try {
       await ensurePlayable(track);
       if (generation !== this.generation) return { ok: false, dropped: true };
-      const mediaUrl = await directMediaUrl(track.url);
-      if (generation !== this.generation) return { ok: false, dropped: true };
       console.log(`Opening audio for ${track.url}`);
-      opened = openAudioStream(mediaUrl);
+      opened = openAudioStream(track.url);
       this.process = opened.process;
       const probed = await demuxProbe(opened.stream);
       opened.clearStartTimeout();
