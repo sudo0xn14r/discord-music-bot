@@ -9,7 +9,7 @@ const {
 } = require('@discordjs/voice');
 const { UserError } = require('./errors');
 const { formatDuration, oneLine, shortError } = require('./format');
-const { ensurePlayable, friendlyYtError, openAudioStream } = require('./media');
+const { directMediaUrl, ensurePlayable, friendlyYtError, openAudioStream } = require('./media');
 
 const MAX_QUEUE = 50;
 const MAX_FAILURES = 3;
@@ -188,8 +188,10 @@ class GuildSession {
     try {
       await ensurePlayable(track);
       if (generation !== this.generation) return { ok: false, dropped: true };
+      const mediaUrl = await directMediaUrl(track.url);
+      if (generation !== this.generation) return { ok: false, dropped: true };
       console.log(`Opening audio for ${track.url}`);
-      opened = openAudioStream(track.url);
+      opened = openAudioStream(mediaUrl);
       this.process = opened.process;
       const probed = await demuxProbe(opened.stream);
       opened.clearStartTimeout();
@@ -198,6 +200,10 @@ class GuildSession {
         return { ok: false, dropped: true };
       }
       console.log(`Probed ${track.url} as ${probed.type}.`);
+      if (probed.type !== 'ogg/opus') {
+        const detail = opened.stderr().trim();
+        throw new Error(detail || 'That audio could not be converted for Discord.');
+      }
       const resource = createAudioResource(probed.stream, { inputType: probed.type });
       this.process = opened.process;
       opened.process.once('close', () => {
@@ -205,7 +211,12 @@ class GuildSession {
       });
       this.player.play(resource);
       await entersState(this.player, AudioPlayerStatus.Playing, 20_000);
+      await new Promise((resolve) => setTimeout(resolve, 500));
       if (generation !== this.generation) return { ok: false, dropped: true };
+      if (this.player.state.status !== AudioPlayerStatus.Playing) {
+        const detail = opened.stderr().trim();
+        throw new Error(detail || 'The audio stream ended before any sound was sent.');
+      }
       console.log(`Audio started for ${track.url}.`);
       if (announce) {
         const via = track.source === 'spotify' || track.source === 'deezer' || track.source === 'apple'

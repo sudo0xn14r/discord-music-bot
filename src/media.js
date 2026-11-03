@@ -140,10 +140,9 @@ function commandWorks(command, args) {
   return probe.status === 0;
 }
 
-function youtubeArgs() {
-  const args = ['--extractor-args', 'youtube:player_client=tv,web_safari'];
-  if (commandWorks('node', ['-e', 'process.exit(0)'])) args.unshift('--js-runtimes', 'node');
-  return args;
+function jsRuntimeArgs() {
+  if (commandWorks('node', ['-e', 'process.exit(0)'])) return ['--js-runtimes', 'node'];
+  return [];
 }
 
 function requireBinary() {
@@ -287,7 +286,7 @@ async function resolveWithYtDlp(target, requestedBy, { collection, limit, label 
       '--no-warnings',
       '--skip-download',
       '--no-cache-dir',
-      ...youtubeArgs(),
+      ...jsRuntimeArgs(),
       '--flat-playlist',
       ...(asCollection ? ['--yes-playlist', '--playlist-end', String(limit)] : ['--no-playlist']),
       ...cookieArgs(),
@@ -538,34 +537,41 @@ function killChild(child) {
   }
 }
 
-function openAudioStream(url) {
-  const binary = requireBinary();
+async function directMediaUrl(url) {
+  const ffmpeg = ffmpegBinary();
+  const listed = await runYtDlp([
+    '-g',
+    '--no-warnings',
+    '--no-playlist',
+    '--no-cache-dir',
+    ...jsRuntimeArgs(),
+    '-f', 'bestaudio/best',
+    ...cookieArgs(),
+    ...(ffmpeg ? ['--ffmpeg-location', ffmpeg] : []),
+    '--',
+    url,
+  ], METADATA_TIMEOUT_MS);
+  const mediaUrl = listed.split(/\r?\n/).map((line) => line.trim()).find((line) => /^https?:\/\//i.test(line));
+  if (!mediaUrl) throw new UserError('I could not get an audio stream for that.');
+  return mediaUrl;
+}
+
+function openAudioStream(mediaUrl) {
   const ffmpeg = ffmpegBinary();
   if (!ffmpeg) {
     throw new UserError('ffmpeg is not installed. Install it on the VPS so audio can be played.');
   }
 
-  // YouTube audio is usually WebM. Streamed WebM does not play in Discord voice.
-  // ffmpeg turns whatever yt-dlp downloads into an Ogg Opus stream Discord can send.
-  const ytdlp = spawn(binary, [
-    '--no-warnings',
-    '--quiet',
-    '--no-progress',
-    '--no-playlist',
-    '--no-cache-dir',
-    ...youtubeArgs(),
-    '-f', 'bestaudio/best',
-    '-o', '-',
-    ...cookieArgs(),
-    '--ffmpeg-location', ffmpeg,
-    '--',
-    url,
-  ], { stdio: ['ignore', 'pipe', 'pipe'] });
-
+  // Read the media URL directly. Piping yt-dlp's WebM into Discord ends immediately.
   const transcoder = spawn(ffmpeg, [
     '-hide_banner',
     '-loglevel', 'error',
-    '-i', 'pipe:0',
+    '-reconnect', '1',
+    '-reconnect_streamed', '1',
+    '-reconnect_delay_max', '5',
+    '-user_agent', 'Mozilla/5.0',
+    '-referer', 'https://www.youtube.com/',
+    '-i', mediaUrl,
     '-vn',
     '-acodec', 'libopus',
     '-b:a', '128k',
@@ -574,27 +580,18 @@ function openAudioStream(url) {
     '-application', 'audio',
     '-f', 'opus',
     'pipe:1',
-  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
   let stderr = '';
   const collect = (chunk) => {
     stderr += chunk.toString();
     if (stderr.length > 8000) stderr = stderr.slice(-8000);
   };
-  ytdlp.stderr.on('data', collect);
   transcoder.stderr.on('data', collect);
-  ytdlp.on('error', () => {});
   transcoder.on('error', () => {});
-  ytdlp.stdout.on('error', () => {});
-  transcoder.stdin.on('error', () => {});
-  ytdlp.stdout.pipe(transcoder.stdin);
 
-  const kill = () => {
-    killChild(ytdlp);
-    killChild(transcoder);
-  };
+  const kill = () => killChild(transcoder);
   const timer = setTimeout(kill, STREAM_START_TIMEOUT_MS);
-  transcoder.on('close', () => killChild(ytdlp));
   transcoder.kill = () => {
     kill();
     return true;
@@ -618,6 +615,7 @@ module.exports = {
   classifyQuery,
   resolveTracks,
   ensurePlayable,
+  directMediaUrl,
   openAudioStream,
   friendlyYtError,
   matchNote,
