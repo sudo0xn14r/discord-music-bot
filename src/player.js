@@ -1,0 +1,359 @@
+const {
+  AudioPlayerStatus,
+  VoiceConnectionStatus,
+  createAudioPlayer,
+  createAudioResource,
+  demuxProbe,
+  entersState,
+  joinVoiceChannel,
+} = require('@discordjs/voice');
+const { UserError } = require('./errors');
+const { formatDuration, oneLine, shortError } = require('./format');
+const { ensurePlayable, friendlyYtError, openAudioStream } = require('./media');
+
+const MAX_QUEUE = 50;
+const MAX_FAILURES = 3;
+
+class GuildSession {
+  constructor(guildId, manager) {
+    this.guildId = guildId;
+    this.manager = manager;
+    this.tracks = [];
+    this.current = null;
+    this.connection = null;
+    this.textChannelId = null;
+    this.process = null;
+    this.generation = 0;
+    this.suppressAutoplay = false;
+    this.intentionalLeave = false;
+    this.playbackError = null;
+    this.consecutiveFailures = 0;
+    this.playLock = false;
+    this.advanceAfterLock = false;
+    this.advanceAnnounce = true;
+    this.player = createAudioPlayer();
+
+    this.player.on('error', (error) => {
+      this.playbackError = error;
+      console.error(`Playback error in ${this.guildId}: ${error.message}`);
+    });
+
+    this.player.on(AudioPlayerStatus.Playing, () => {
+      this.consecutiveFailures = 0;
+    });
+
+    this.player.on(AudioPlayerStatus.Idle, () => {
+      const error = this.playbackError;
+      this.playbackError = null;
+      if (this.suppressAutoplay) return;
+      const failed = error ? this.current : null;
+      if (failed) {
+        void this.announce(`Couldn't play **${oneLine(failed.title)}**: ${shortError(error)}`);
+      }
+      if (this.playLock) {
+        this.advanceAfterLock = true;
+        this.advanceAnnounce = true;
+        return;
+      }
+      void this.playNext({ announce: true });
+    });
+  }
+
+  get channelId() {
+    if (!this.connection || this.connection.state.status === VoiceConnectionStatus.Destroyed) {
+      return null;
+    }
+    return this.connection.joinConfig.channelId;
+  }
+
+  bindTextChannel(channelId) {
+    this.textChannelId = channelId;
+  }
+
+  async join(channel) {
+    if (this.channelId === channel.id) return;
+    if (this.channelId) {
+      throw new UserError('You need to be in the same voice channel as me.');
+    }
+
+    const connection = joinVoiceChannel({
+      channelId: channel.id,
+      guildId: channel.guild.id,
+      adapterCreator: channel.guild.voiceAdapterCreator,
+      selfDeaf: true,
+      selfMute: false,
+    });
+    this.connection = connection;
+    connection.on('error', (error) => {
+      console.error(`Voice connection error in ${this.guildId}: ${error.message}`);
+    });
+
+    try {
+      await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+    } catch (error) {
+      console.error(`Voice join failed in ${this.guildId}: ${error.message}`);
+      this.connection = null;
+      if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+      throw new UserError("I couldn't join your voice channel. I need Connect and Speak permission there.");
+    }
+
+    connection.subscribe(this.player);
+    this.watchConnection(connection);
+  }
+
+  watchConnection(connection) {
+    connection.on(VoiceConnectionStatus.Disconnected, async () => {
+      try {
+        await Promise.race([
+          entersState(connection, VoiceConnectionStatus.Signalling, 5_000),
+          entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
+        ]);
+      } catch {
+        if (connection.state.status !== VoiceConnectionStatus.Destroyed) connection.destroy();
+      }
+    });
+
+    connection.on(VoiceConnectionStatus.Destroyed, () => {
+      if (this.connection !== connection) return;
+      const intentional = this.intentionalLeave;
+      this.connection = null;
+      this.stopPlayback();
+      if (!intentional) void this.announce('I was disconnected from voice.');
+      this.manager.forget(this.guildId);
+    });
+  }
+
+  freeSlots() {
+    return Math.max(0, MAX_QUEUE - this.tracks.length);
+  }
+
+  enqueueAll(tracks) {
+    if (!tracks.length) throw new UserError("I couldn't find anything to play.");
+    const room = this.freeSlots();
+    if (room <= 0) {
+      throw new UserError(`The queue is full (${MAX_QUEUE} tracks). Skip or stop before adding more.`);
+    }
+    const accepted = tracks.slice(0, room);
+    const startNow = !this.current && this.player.state.status === AudioPlayerStatus.Idle;
+    for (const track of accepted) this.tracks.push(track);
+    if (startNow) void this.playNext({ announce: false });
+    return {
+      started: startNow,
+      added: accepted.length,
+      skipped: tracks.length - accepted.length,
+      first: accepted[0],
+      position: startNow ? 0 : this.tracks.length - accepted.length + 1,
+    };
+  }
+
+  async playNext({ announce }) {
+    if (this.playLock) {
+      this.advanceAfterLock = true;
+      this.advanceAnnounce = announce;
+      return;
+    }
+    this.playLock = true;
+    try {
+      await this.startTrack({ announce });
+    } finally {
+      this.playLock = false;
+      if (this.advanceAfterLock) {
+        const nextAnnounce = this.advanceAnnounce;
+        this.advanceAfterLock = false;
+        await this.playNext({ announce: nextAnnounce });
+      }
+    }
+  }
+
+  async startTrack({ announce }) {
+    const generation = ++this.generation;
+    this.killProcess();
+    const track = this.tracks.shift() || null;
+    this.current = track;
+    if (!track) return;
+
+    let opened;
+    try {
+      await ensurePlayable(track);
+      if (generation !== this.generation) return;
+      opened = openAudioStream(track.url);
+      this.process = opened.process;
+      const probed = await demuxProbe(opened.stream);
+      opened.clearStartTimeout();
+      if (generation !== this.generation) {
+        opened.kill();
+        return;
+      }
+      const resource = createAudioResource(probed.stream, { inputType: probed.type });
+      this.process = opened.process;
+      opened.process.once('close', () => {
+        if (this.process === opened.process) this.process = null;
+      });
+      this.player.play(resource);
+      if (generation !== this.generation || this.player.state.status === AudioPlayerStatus.Idle) return;
+      if (announce) {
+        const via = track.source === 'spotify' || track.source === 'deezer' || track.source === 'apple'
+          ? ' (YouTube match)'
+          : '';
+        await this.announce(`Now playing **${oneLine(track.title)}** (${formatDuration(track.duration)})${via}.`);
+      }
+    } catch (error) {
+      opened?.kill();
+      if (generation !== this.generation) return;
+      this.consecutiveFailures += 1;
+      const detail = opened ? friendlyYtError(opened.stderr(), null) : shortError(error);
+      const reason = detail && !/^Couldn't open that \(yt-dlp/.test(detail) ? detail : shortError(error);
+      console.error(`Failed to start ${track.url}: ${reason}`);
+      await this.announce(`Couldn't play **${oneLine(track.title)}**: ${reason}`);
+      this.current = null;
+      if (this.consecutiveFailures >= MAX_FAILURES) {
+        this.tracks = [];
+        await this.announce(`Stopped after ${MAX_FAILURES} playback failures in a row.`);
+        return;
+      }
+      this.advanceAfterLock = true;
+      this.advanceAnnounce = true;
+    }
+  }
+
+  pause() {
+    this.assertControllable();
+    const status = this.player.state.status;
+    if (status === AudioPlayerStatus.Paused) {
+      throw new UserError('Playback is already paused.');
+    }
+    if (status === AudioPlayerStatus.Playing) {
+      this.player.pause(true);
+      return 'Paused.';
+    }
+    if (status === AudioPlayerStatus.AutoPaused) {
+      throw new UserError('The voice connection dropped. Playback should resume on its own.');
+    }
+    if (status === AudioPlayerStatus.Buffering || this.current) {
+      throw new UserError('The track is still starting. Try again in a moment.');
+    }
+    throw new UserError('Nothing is playing right now.');
+  }
+
+  resume() {
+    this.assertControllable();
+    const status = this.player.state.status;
+    if (status === AudioPlayerStatus.Paused) {
+      this.player.unpause();
+      return 'Resumed.';
+    }
+    if (status === AudioPlayerStatus.Playing) {
+      throw new UserError("Playback isn't paused.");
+    }
+    if (status === AudioPlayerStatus.AutoPaused) {
+      throw new UserError('The voice connection dropped. Playback should resume on its own.');
+    }
+    if (status === AudioPlayerStatus.Buffering || this.current) {
+      throw new UserError('The track is still starting. Try again in a moment.');
+    }
+    throw new UserError('Nothing is playing right now.');
+  }
+
+  skip() {
+    this.assertControllable();
+    if (!this.current) throw new UserError('Nothing is playing right now.');
+    const title = oneLine(this.current.title);
+    if (this.player.state.status === AudioPlayerStatus.Idle) {
+      this.generation += 1;
+      this.killProcess();
+      void this.playNext({ announce: true });
+    } else {
+      this.player.stop(true);
+    }
+    return `Skipped **${title}**.`;
+  }
+
+  stop() {
+    this.assertControllable();
+    if (!this.current && this.tracks.length === 0) {
+      throw new UserError('Nothing is playing right now.');
+    }
+    this.stopPlayback();
+    return 'Stopped playback and cleared the queue.';
+  }
+
+  leave() {
+    if (!this.channelId) throw new UserError("I'm not in a voice channel.");
+    this.intentionalLeave = true;
+    this.connection.destroy();
+    return 'Left the voice channel and cleared the queue.';
+  }
+
+  assertControllable() {
+    if (!this.channelId) throw new UserError("I'm not in a voice channel.");
+  }
+
+  stopPlayback() {
+    this.suppressAutoplay = true;
+    this.advanceAfterLock = false;
+    this.generation += 1;
+    this.killProcess();
+    this.tracks = [];
+    this.current = null;
+    this.playbackError = null;
+    this.consecutiveFailures = 0;
+    this.player.stop(true);
+    this.suppressAutoplay = false;
+  }
+
+  killProcess() {
+    if (!this.process) return;
+    if (this.process.exitCode == null && !this.process.killed) {
+      this.process.kill('SIGKILL');
+    }
+    this.process = null;
+  }
+
+  async announce(text) {
+    if (!this.textChannelId) return;
+    try {
+      const channel = await this.manager.client.channels.fetch(this.textChannelId);
+      if (!channel || !channel.isTextBased()) return;
+      await channel.send({ content: text, allowedMentions: { parse: [] } });
+    } catch (error) {
+      console.error(`Could not send a playback message: ${error.message}`);
+    }
+  }
+}
+
+class Player {
+  constructor(client) {
+    this.client = client;
+    this.sessions = new Map();
+  }
+
+  peek(guildId) {
+    return this.sessions.get(guildId) || null;
+  }
+
+  session(guildId) {
+    let existing = this.sessions.get(guildId);
+    if (!existing) {
+      existing = new GuildSession(guildId, this);
+      this.sessions.set(guildId, existing);
+    }
+    return existing;
+  }
+
+  forget(guildId) {
+    this.sessions.delete(guildId);
+  }
+
+  shutdown() {
+    for (const session of this.sessions.values()) {
+      session.intentionalLeave = true;
+      try {
+        session.connection?.destroy();
+      } catch (error) {
+        console.error(`Voice shutdown error: ${error.message}`);
+      }
+    }
+  }
+}
+
+module.exports = { Player, MAX_QUEUE };

@@ -1,0 +1,20 @@
+{
+  "name": "discord-music-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Friends-only Discord music bot. One Node process, no Lavalink.",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "check": "node --check src/index.js && node --check src/commands.js && node --check src/player.js && node --check src/media.js && node --check src/format.js && node --check src/errors.js"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "discord.js": "^14.28.0",
+    "dotenv": "^16.6.1",
+    "opusscript": "^0.0.8"
+  }
+}
