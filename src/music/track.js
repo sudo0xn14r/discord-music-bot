@@ -15,6 +15,7 @@ function createTrack(fields) {
     durationMs,
     source: fields.source,
     requester: clean(fields.requester, 'Someone'),
+    requesterId: /^\d{17,20}$/.test(String(fields.requesterId || '')) ? String(fields.requesterId) : null,
     pageUrl: fields.pageUrl || null,
     filePath: fields.filePath || null,
     soundcloudId: fields.soundcloudId ? String(fields.soundcloudId) : null,

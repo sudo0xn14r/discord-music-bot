@@ -44,6 +44,19 @@ function openDatabase(filePath) {
       requester TEXT,
       played_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS listens (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      song_key TEXT NOT NULL,
+      title TEXT NOT NULL,
+      artist TEXT NOT NULL,
+      requester_id TEXT NOT NULL,
+      requester_name TEXT NOT NULL,
+      started_at INTEGER NOT NULL,
+      played_ms INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS listens_guild_song ON listens (guild_id, song_key);
+    CREATE INDEX IF NOT EXISTS listens_guild_user ON listens (guild_id, requester_id);
   `);
   ensureColumn(db, 'guild_settings', 'dj_role_id', 'TEXT');
   ensureColumn(db, 'playlist_tracks', 'identifier', 'TEXT');
@@ -181,6 +194,68 @@ class BotDatabase {
     `).run(guildId, guildId);
   }
 
+  beginListen(guildId, track) {
+    const title = track?.title || 'Unknown title';
+    const artist = track?.artist || 'Unknown artist';
+    const requesterName = track?.requester || 'Someone';
+    const requesterId = track?.requesterId || `name:${requesterName}`;
+    const inserted = this.db.prepare(`
+      INSERT INTO listens (
+        guild_id, song_key, title, artist, requester_id, requester_name, started_at, played_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+    `).run(guildId, songKey(title, artist), title, artist, requesterId, requesterName, Date.now());
+    return Number(inserted.lastInsertRowid);
+  }
+
+  touchListen(id, playedMs) {
+    if (!id) return;
+    this.db.prepare('UPDATE listens SET played_ms = ? WHERE id = ?').run(Math.max(0, Math.floor(playedMs || 0)), id);
+  }
+
+  playStats(guildId, limit = 5) {
+    const totals = this.db.prepare(`
+      SELECT COUNT(*) AS plays, COALESCE(SUM(played_ms), 0) AS playedMs
+      FROM listens
+      WHERE guild_id = ?
+    `).get(guildId);
+    const songs = this.db.prepare(`
+      SELECT
+        (SELECT title FROM listens newest
+          WHERE newest.guild_id = listens.guild_id AND newest.song_key = listens.song_key
+          ORDER BY newest.id DESC LIMIT 1) AS title,
+        (SELECT artist FROM listens newest
+          WHERE newest.guild_id = listens.guild_id AND newest.song_key = listens.song_key
+          ORDER BY newest.id DESC LIMIT 1) AS artist,
+        COUNT(*) AS plays,
+        COALESCE(SUM(played_ms), 0) AS playedMs
+      FROM listens
+      WHERE guild_id = ?
+      GROUP BY song_key
+      ORDER BY plays DESC, playedMs DESC, title COLLATE NOCASE
+      LIMIT ?
+    `).all(guildId, limit);
+    const users = this.db.prepare(`
+      SELECT
+        requester_id AS requesterId,
+        (SELECT requester_name FROM listens newest
+          WHERE newest.guild_id = listens.guild_id AND newest.requester_id = listens.requester_id
+          ORDER BY newest.id DESC LIMIT 1) AS requesterName,
+        COUNT(*) AS plays,
+        COALESCE(SUM(played_ms), 0) AS playedMs
+      FROM listens
+      WHERE guild_id = ?
+      GROUP BY requester_id
+      ORDER BY plays DESC, playedMs DESC, requesterName COLLATE NOCASE
+      LIMIT ?
+    `).all(guildId, limit);
+    return {
+      plays: totals?.plays || 0,
+      playedMs: totals?.playedMs || 0,
+      songs,
+      users,
+    };
+  }
+
   recentHistory(guildId, limit = 10) {
     return this.db.prepare(`
       SELECT title, artist, source, page_url AS pageUrl, requester, played_at AS playedAt
@@ -270,4 +345,9 @@ class BotDatabase {
   }
 }
 
-module.exports = { openDatabase, BotDatabase };
+function songKey(title, artist) {
+  const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return `${normalize(title)}\n${normalize(artist)}`;
+}
+
+module.exports = { openDatabase, BotDatabase, songKey };

@@ -5,6 +5,9 @@ function bindPlayerEvents(player, session) {
   player.boundGuildPlayback = true;
 
   player.on('end', (event) => {
+    if (event.reason === 'finished' || event.reason === 'loadFailed') {
+      session.finishListen({ completed: event.reason === 'finished' });
+    }
     const started = session.playGeneration;
     session.enqueue(async () => {
       if (session.starting || session.leaving) return;
@@ -65,7 +68,10 @@ function bindPlayerEvents(player, session) {
     if (session.queue.current && Number.isFinite(length) && length > 0) {
       session.queue.current.durationMs = length;
     }
-    if (session.queue.current) session.manager.database.addHistory(session.guildId, session.queue.current);
+    if (session.queue.current) {
+      session.manager.database.addHistory(session.guildId, session.queue.current);
+      session.beginListen(session.queue.current);
+    }
   });
 
   player.on('closed', (event) => {

@@ -25,6 +25,10 @@ class GuildSession {
     this.tail = Promise.resolve();
     this.filter = 'off';
     this.idleSince = null;
+    this.listenId = null;
+    this.listenMaxMs = 0;
+    this.listenStartMs = 0;
+    this.listenDurationMs = null;
     this.lastPositionSave = 0;
     this.skipPersist = false;
     this.pendingSeekMs = 0;
@@ -88,10 +92,63 @@ class GuildSession {
 
   notePosition(positionMs) {
     this.positionMs = positionMs;
+    if (positionMs > this.listenMaxMs) this.listenMaxMs = positionMs;
     const now = Date.now();
     if (now - this.lastPositionSave < 15000) return;
     this.lastPositionSave = now;
+    this.touchListen();
     this.persist();
+  }
+
+  beginListen(track) {
+    this.finishListen();
+    this.listenStartMs = Math.max(0, this.positionMs || 0);
+    this.listenMaxMs = this.listenStartMs;
+    this.listenDurationMs = Number.isFinite(track?.durationMs) ? track.durationMs : null;
+    const database = this.manager?.database;
+    if (!database?.beginListen || !track) {
+      this.listenId = null;
+      return;
+    }
+    try {
+      this.listenId = database.beginListen(this.guildId, track);
+    } catch (error) {
+      this.listenId = null;
+      console.error(`[db] listen start failed: ${error.message}`);
+    }
+  }
+
+  touchListen() {
+    if (!this.listenId || !this.manager?.database?.touchListen) return;
+    try {
+      this.manager.database.touchListen(this.listenId, this.listenedMs(false));
+    } catch (error) {
+      console.error(`[db] listen update failed: ${error.message}`);
+    }
+  }
+
+  listenedMs(completed) {
+    const reached = Math.max(this.listenMaxMs || 0, this.positionMs || 0);
+    const duration = this.listenDurationMs;
+    if (completed && this.listenStartMs === 0 && Number.isFinite(duration) && duration > 0) return duration;
+    if (Number.isFinite(duration) && duration > 0) return Math.min(reached, duration);
+    return reached;
+  }
+
+  finishListen({ completed = false } = {}) {
+    const id = this.listenId;
+    if (!id) return;
+    const playedMs = this.listenedMs(completed);
+    this.listenId = null;
+    this.listenMaxMs = 0;
+    this.listenStartMs = 0;
+    this.listenDurationMs = null;
+    if (!this.manager?.database?.touchListen) return;
+    try {
+      this.manager.database.touchListen(id, playedMs);
+    } catch (error) {
+      console.error(`[db] listen finish failed: ${error.message}`);
+    }
   }
 
   displayTitle(track) {
@@ -297,6 +354,7 @@ class GuildSession {
       this.generation += 1;
       this.playGeneration = -1;
       if (now && this.player) {
+        this.finishListen();
         try {
           await this.player.stopTrack();
         } catch (error) {
@@ -316,6 +374,7 @@ class GuildSession {
       }
       this.generation += 1;
       this.playGeneration = -1;
+      this.finishListen();
       if (this.player) {
         try {
           await this.player.stopTrack();
@@ -336,6 +395,7 @@ class GuildSession {
       this.queue.previous();
       this.generation += 1;
       this.playGeneration = -1;
+      this.finishListen();
       if (this.player) {
         try {
           await this.player.stopTrack();
@@ -393,6 +453,7 @@ class GuildSession {
   }
 
   async disconnectQueued(text) {
+    this.finishListen();
     this.leaving = true;
     this.generation += 1;
     this.playGeneration = -1;
@@ -418,6 +479,7 @@ class GuildSession {
 
   async shutdown() {
     return this.enqueue(async () => {
+      this.finishListen();
       this.skipPersist = true;
       this.persist();
       this.leaving = true;

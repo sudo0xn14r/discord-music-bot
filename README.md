@@ -91,9 +91,13 @@ The bot reconnects if Lavalink drops, and Lavalink session resume is enabled. Th
    Connect and Speak alone (`permissions=3145728`) still run the slash commands.
 4. Join a voice channel and use `/play`.
 
-Commands: `/play`, `/playnow`, `/pause`, `/resume`, `/skip`, `/stop`, `/clear`, `/queue`, `/nowplaying`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter`, `/djrole`, `/playlist`, `/history`.
+Commands: `/play`, `/playnow`, `/pause`, `/resume`, `/skip`, `/stop`, `/clear`, `/queue`, `/nowplaying`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter`, `/djrole`, `/playlist`, `/history`, `/stats`.
 
 The player is an embed with a progress bar. Buttons are Pause, Skip, Loop, Shuffle, Stop, and Previous. `/queue` pages through the upcoming songs. `/loop` is `off`, `track`, or `queue`. `/seek` takes seconds or `1:30`. `/filter` is `bassboost`, `nightcore`, or `off`. `/clear` removes upcoming songs and leaves the current one playing. `/playnow` interrupts the current song and keeps the rest of the queue.
+
+`/stats` shows how many times songs have started, who requested them, and how long was actually heard. The totals are for this server. `/history` is only the latest plays.
+
+With nothing left to play, the bot leaves the voice channel after `IDLE_MINUTES` (10 by default) and says so in the last text channel. `0` turns that off. A paused song is still the current song, so the bot stays.
 
 `/djrole` is optional. With no role set, anyone in the same voice channel can use the controls. With a role set, anyone can still `/play`, pause, and skip. Stop, clear, leave, shuffle, remove, move, volume, filter, seek, loop, and `/playnow` need that role or Manage Server.
 
