@@ -169,6 +169,11 @@ class GuildSession {
     while (this.queue.current && failures < MAX_CONSECUTIVE_FAILURES) {
       if (generation !== this.generation || this.leaving) return { dropped: true, skipped };
       const track = this.queue.current;
+      if (track.encoded) {
+        const played = await this.startTrack(track, track.encoded, generation, options, skipped);
+        if (played) return played;
+        track.encoded = null;
+      }
       let identifier;
       try {
         identifier = await this.manager.providers.playbackIdentifier(track);
@@ -216,31 +221,11 @@ class GuildSession {
         this.dropCurrent();
         continue;
       }
-      try {
-        this.starting = true;
-        this.playGeneration = generation;
-        this.paused = false;
-        this.pendingSeekMs = !skipped.length && options.seekMs > 0 ? Math.floor(options.seekMs) : 0;
-        await this.player.playTrack({
-          track: { encoded: response.data.encoded },
-          volume: this.queue.volume,
-        });
-        await this.restorePlaybackOptions(options, skipped);
-        return { ok: true, track, skipped };
-      } catch (error) {
-        this.playGeneration = -1;
-        log('error', 'playback failed', {
-          guildId: this.guildId,
-          source: track.source,
-          error: error.message,
-          node: this.manager.lavalink?.getIdealNode?.()?.name,
-        });
-        failures += 1;
-        skipped.push({ title: track.title, reason: 'The audio server could not start playback.' });
-        this.dropCurrent();
-      } finally {
-        this.starting = false;
-      }
+      const played = await this.startTrack(track, response.data.encoded, generation, options, skipped);
+      if (played) return played;
+      failures += 1;
+      skipped.push({ title: track.title, reason: 'The audio server could not start playback.' });
+      this.dropCurrent();
     }
     if (generation !== this.generation || this.leaving) return { dropped: true, skipped };
     if (this.queue.current) {
@@ -250,6 +235,35 @@ class GuildSession {
     }
     if (skipped.length) return { ok: false, reason: skipped.at(-1).reason, skipped };
     return { ok: true, empty: true, skipped };
+  }
+
+  async startTrack(track, encoded, generation, options, skipped) {
+    if (!this.player) {
+      return { ok: false, reason: 'I am not connected to voice.', track, skipped };
+    }
+    try {
+      this.starting = true;
+      this.playGeneration = generation;
+      this.paused = false;
+      this.pendingSeekMs = !skipped.length && options.seekMs > 0 ? Math.floor(options.seekMs) : 0;
+      await this.player.playTrack({
+        track: { encoded },
+        volume: this.queue.volume,
+      });
+      await this.restorePlaybackOptions(options, skipped);
+      return { ok: true, track, skipped };
+    } catch (error) {
+      this.playGeneration = -1;
+      log('error', 'playback failed', {
+        guildId: this.guildId,
+        source: track.source,
+        error: error.message,
+        node: this.manager.lavalink?.getIdealNode?.()?.name,
+      });
+      return null;
+    } finally {
+      this.starting = false;
+    }
   }
 
   dropCurrent() {

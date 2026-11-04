@@ -19,6 +19,7 @@ function createTrack(fields) {
     filePath: fields.filePath || null,
     soundcloudId: fields.soundcloudId ? String(fields.soundcloudId) : null,
     identifier: fields.identifier || null,
+    encoded: typeof fields.encoded === 'string' && fields.encoded ? fields.encoded : null,
     matchedFrom: fields.matchedFrom || null,
   };
 }

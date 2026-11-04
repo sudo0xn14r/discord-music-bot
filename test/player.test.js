@@ -70,6 +70,30 @@ test('a failed track does not stay stuck as the current song', async () => {
   assert.equal(guild.player.played.length, 0);
 });
 
+test('an encoded youtube track plays without loading the watch page again', async () => {
+  const guild = session();
+  let resolved = false;
+  guild.manager.lavalink.getIdealNode = () => ({
+    rest: {
+      async resolve() {
+        resolved = true;
+        return { loadType: 'empty' };
+      },
+    },
+  });
+  guild.queue.current = createTrack({
+    title: 'Haroun',
+    artist: 'El Rass',
+    source: 'youtube',
+    identifier: 'https://www.youtube.com/watch?v=abc',
+    encoded: 'encoded-track',
+  });
+  const outcome = await guild.playCurrent(1);
+  assert.equal(outcome.ok, true);
+  assert.equal(resolved, false);
+  assert.deepEqual(guild.player.played, ['encoded-track']);
+});
+
 test('two server sessions keep their own players and queues', async () => {
   const first = session();
   const second = session();

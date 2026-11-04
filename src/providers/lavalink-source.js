@@ -21,6 +21,7 @@ function fromLavalinkTrack(track, requester, source = 'lavalink') {
     requester,
     pageUrl: info.uri || null,
     identifier: info.uri || null,
+    encoded: track?.encoded || null,
   });
 }
 
