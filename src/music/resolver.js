@@ -30,7 +30,8 @@ function attachRequester(track, requester, matchedFrom) {
 
 async function resolveCatalog(input, requester, limit, providers, providerName) {
   const provider = providers.get(providerName);
-  if (!provider || !provider.enabled()) {
+  const ready = provider && (typeof provider.canResolve === 'function' ? provider.canResolve() : provider.enabled());
+  if (!ready) {
     throw new UserError(`${provider?.label || 'That source'} is not configured.`);
   }
   let metadata;

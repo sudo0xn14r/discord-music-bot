@@ -94,6 +94,10 @@ class SpotifyProvider {
     return items;
   }
 
+  canResolve() {
+    return true;
+  }
+
   async resolveMetadata(input) {
     const target = spotifyTarget(input);
     if (!target) {
@@ -102,6 +106,18 @@ class SpotifyProvider {
       throw error;
     }
     if (target.type === 'episode') return { kind: 'episode', tracks: [] };
+    if (this.enabled()) {
+      try {
+        return await this.resolveWithApi(target);
+      } catch (error) {
+        if (error.status !== 401 && error.status !== 403) throw error;
+        console.error(`[provider:spotify] API refused (${error.status}). Using the public page.`);
+      }
+    }
+    return this.loadEmbed(target);
+  }
+
+  async resolveWithApi(target) {
     if (target.type === 'track') {
       const track = await this.apiGet(`/tracks/${encodeURIComponent(target.id)}`);
       const metadata = this.metadataFromTrack(track);
@@ -122,9 +138,78 @@ class SpotifyProvider {
     return { kind: 'tracks', tracks };
   }
 
+  async loadEmbed(target) {
+    const response = await fetch(`https://open.spotify.com/embed/${target.type}/${encodeURIComponent(target.id)}`, {
+      headers: {
+        Accept: 'text/html',
+        'User-Agent': 'Mozilla/5.0',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+    const html = await response.text();
+    if (!response.ok) {
+      const error = new Error(`Request failed (${response.status}).`);
+      error.status = response.status;
+      throw error;
+    }
+    return parseSpotifyEmbed(html, target);
+  }
+
   friendly(error) {
     return friendlyProviderError(error, 'Spotify');
   }
 }
 
-module.exports = { SpotifyProvider };
+function pageUrlFromUri(uri, fallback) {
+  const match = String(uri || '').match(/^spotify:(track|album|playlist):([A-Za-z0-9]+)$/);
+  if (!match) return fallback;
+  return `https://open.spotify.com/${match[1]}/${match[2]}`;
+}
+
+function parseSpotifyEmbed(html, target) {
+  const match = String(html || '').match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+  if (!match) {
+    const error = new Error('Spotify did not publish the song list for that link.');
+    error.userError = true;
+    throw error;
+  }
+  let data;
+  try {
+    data = JSON.parse(match[1]);
+  } catch {
+    const error = new Error('Spotify did not publish the song list for that link.');
+    error.userError = true;
+    throw error;
+  }
+  const entity = data?.props?.pageProps?.state?.data?.entity;
+  if (!entity || entity.type === 'episode') return { kind: 'episode', tracks: [] };
+  const pageUrl = `https://open.spotify.com/${target.type}/${target.id}`;
+  if (target.type === 'track' || entity.type === 'track') {
+    const artists = Array.isArray(entity.artists) ? entity.artists.map((artist) => artist.name).filter(Boolean) : [];
+    const title = entity.title || entity.name;
+    return {
+      kind: 'tracks',
+      tracks: title ? [{
+        title,
+        artist: artists.join(', '),
+        album: null,
+        durationMs: Number.isFinite(entity.duration) ? entity.duration : null,
+        pageUrl,
+      }] : [],
+    };
+  }
+  const albumName = target.type === 'album' ? (entity.name || entity.title || null) : null;
+  const list = Array.isArray(entity.trackList) ? entity.trackList : [];
+  return {
+    kind: 'tracks',
+    tracks: list.slice(0, 50).map((item) => ({
+      title: item.title,
+      artist: item.subtitle || '',
+      album: albumName,
+      durationMs: Number.isFinite(item.duration) ? item.duration : null,
+      pageUrl: pageUrlFromUri(item.uri, pageUrl),
+    })).filter((item) => item.title),
+  };
+}
+
+module.exports = { SpotifyProvider, parseSpotifyEmbed };

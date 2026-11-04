@@ -147,7 +147,7 @@ There is one Lavalink node, named `main`. Shoukaku options in `src/lavalink/clie
 | `SPOTIFY_CLIENT_ID` | no | empty | Both Spotify values are required |
 | `SPOTIFY_CLIENT_SECRET` | no | empty | Also read by Lavalink if its unit loads `.env` |
 
-`spotify`, `apple`, and `deezer` in `PROVIDER_ORDER` log a warning and are removed from the playback order. Any other unknown name logs a warning and is skipped. Apple Music and Deezer metadata do not use keys. They are always "enabled" as catalogs. Spotify metadata turns on only when both Spotify variables are set. YouTube does not need a key. Remove `youtube` from `PROVIDER_ORDER` to disable it.
+`spotify`, `apple`, and `deezer` in `PROVIDER_ORDER` log a warning and are removed from the playback order. Any other unknown name logs a warning and is skipped. Apple Music and Deezer metadata do not use keys. They are always "enabled" as catalogs. Spotify metadata uses the Web API when both Spotify variables are set. If that app refuses the lookup, or the variables are empty, the bot reads the public Spotify page instead. YouTube does not need a key. Remove `youtube` from `PROVIDER_ORDER` to disable it.
 
 Startup prints one `[provider]` line per provider from `ProviderManager.describe()`.
 
