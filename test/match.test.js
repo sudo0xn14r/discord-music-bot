@@ -51,6 +51,14 @@ test('title matching rejects a different song', () => {
   assert.equal(titlesMatch(wanted, { title: 'HUMBLE.', artist: 'Kendrick Lamar' }), false);
   assert.equal(titlesMatch(wanted, { title: 'Not Like Us', artist: 'Someone Else' }), false);
   assert.equal(titlesMatch(
+    { title: 'Sodium', artist: 'Bones' },
+    { title: 'Bones - Sodium', artist: 'TeamSESH' },
+  ), true);
+  assert.equal(titlesMatch(
+    { title: 'Sodium', artist: 'Bones' },
+    { title: 'Sodium', artist: 'Someone Else' },
+  ), false);
+  assert.equal(titlesMatch(
     { title: 'Not Like Us Kendrick Live Set', artist: 'Kendrick Lamar' },
     { title: 'Not Like Us', artist: 'Kendrick Lamar' },
   ), false);

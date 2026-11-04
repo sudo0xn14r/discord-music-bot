@@ -305,7 +305,7 @@ test('spotify metadata falls back to the top youtube result when nothing is clos
   assert.equal(result.tracks[0].title, 'Some Other Song');
   assert.equal(result.tracks[0].matchedFrom, 'spotify');
   assert.equal(result.tracks[0].loose, true);
-  assert.match(result.notice, /top search result/);
+  assert.equal(result.notice, null);
 });
 
 test('a strict local match still beats an unrelated youtube hit', async () => {

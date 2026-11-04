@@ -117,8 +117,11 @@ function titlesMatch(wanted, found) {
   const wantArtist = normalize(wanted.artist);
   if (!wantArtist) return true;
   const foundArtist = normalize(found.artist);
-  if (!foundArtist) return false;
-  return foundArtist.includes(wantArtist) || wantArtist.includes(foundArtist);
+  if (foundArtist && (foundArtist.includes(wantArtist) || wantArtist.includes(foundArtist))) return true;
+  // YouTube often puts the artist in the video title and the label in the channel name.
+  const ignored = new Set(['the', 'and', 'feat', 'ft']);
+  const artistTokens = wantArtist.split(' ').filter((token) => token.length >= 3 && !ignored.has(token));
+  return artistTokens.length > 0 && artistTokens.every((token) => foundTitle.includes(token));
 }
 
 function queryMatches(query, found) {

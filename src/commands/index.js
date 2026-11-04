@@ -238,9 +238,9 @@ function matchNote(track) {
     lavalink: 'SoundCloud',
   }[track.source] || 'a playback source';
   if (track.loose) {
-    return `No close match, so this is the top ${where} result. ${from} audio is not streamed.`;
+    return `No close match on ${where} for this ${from} track, so this is the top result.`;
   }
-  return `Matched the ${from} metadata to ${where}. ${from} audio is not streamed.`;
+  return '';
 }
 
 function hasPermission(member, flag) {

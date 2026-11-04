@@ -73,8 +73,8 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
     throw new UserError(`I couldn't find a match for that ${provider.label} link in ${names}. Nothing else was substituted.`);
   }
   const notes = [];
-  if (looseCount) {
-    notes.push(`${looseCount} track${looseCount === 1 ? '' : 's'} used the top search result because there was no close match.`);
+  if (looseCount > 1) {
+    notes.push(`${looseCount} tracks used the top search result because there was no close match.`);
   }
   if (unmatched) {
     notes.push(`${unmatched} ${provider.label} track${unmatched === 1 ? '' : 's'} had no match and ${unmatched === 1 ? 'was' : 'were'} skipped.`);
