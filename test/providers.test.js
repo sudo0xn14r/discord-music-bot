@@ -394,25 +394,65 @@ test('a soundcloud link plays the track and a set plays each track', async () =>
   };
   const manager = ProviderManager.fromList([lavalink], ['lavalink']);
   const originalFetch = global.fetch;
-  global.fetch = async () => {
-    throw new Error('a full SoundCloud link does not need a lookup');
+  global.fetch = async (url) => {
+    const target = String(url);
+    if (target === 'https://soundcloud.com/') {
+      return { ok: true, async text() { return '<script src="https://a-v2.sndcdn.com/assets/app.js"></script>'; } };
+    }
+    if (target.endsWith('/app.js')) {
+      return { ok: true, async text() { return '},{client_id:"abcdefghijklmnopqrstuvwxyz012345"}'; } };
+    }
+    if (target.includes('/resolve?')) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            kind: 'playlist',
+            id: 9,
+            track_count: 3,
+            tracks: [
+              { id: 1, title: 'One', permalink_url: 'https://soundcloud.com/artist/one', duration: 1000, user: { username: 'Artist' } },
+              { id: 2, kind: 'track' },
+              { id: 3, kind: 'track' },
+            ],
+          });
+        },
+      };
+    }
+    if (target.includes('/tracks?ids=')) {
+      assert.match(target, /ids=2%2C3|ids=2,3/);
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify([
+            { id: 3, title: 'Skipped', permalink_url: '', duration: 1 },
+            { id: 2, title: 'Two', permalink_url: 'https://soundcloud.com/artist/two', duration: 2000, user: { username: 'Artist' } },
+          ]);
+        },
+      };
+    }
+    throw new Error(`unexpected SoundCloud request ${target}`);
   };
   try {
     const track = await resolveRequest('https://m.soundcloud.com/alanwalker/faded?si=tracking', 'Nizar', 5, manager);
     assert.equal(seen[0], 'https://soundcloud.com/alanwalker/faded');
     assert.equal(track.tracks[0].title, 'Faded');
     assert.equal(track.tracks[0].requester, 'Nizar');
+    resetSoundCloudClientId();
     const set = await resolveRequest('https://soundcloud.com/artist/sets/night?utm_source=share', 'Nizar', 5, manager);
-    assert.equal(seen[1], 'https://soundcloud.com/artist/sets/night');
+    assert.equal(seen.length, 1);
     assert.deepEqual(set.tracks.map((item) => item.title), ['One', 'Two']);
+    assert.equal(set.tracks[1].pageUrl, 'https://soundcloud.com/artist/two');
+    assert.equal(set.tracks[1].requester, 'Nizar');
     const secret = await resolveRequest('https://soundcloud.com/artist/private?secret_token=s-abc&si=1', 'Nizar', 1, manager);
-    assert.equal(seen[2], 'https://soundcloud.com/artist/private?secret_token=s-abc');
+    assert.equal(seen[1], 'https://soundcloud.com/artist/private?secret_token=s-abc');
     assert.equal(secret.tracks[0].title, 'Faded');
     const profile = await resolveRequest('https://soundcloud.com/artist', 'Nizar', 1, manager);
-    assert.equal(seen[3], 'https://soundcloud.com/artist');
+    assert.equal(seen[2], 'https://soundcloud.com/artist');
     assert.equal(profile.tracks[0].title, 'Faded');
   } finally {
     global.fetch = originalFetch;
+    resetSoundCloudClientId();
   }
 });
 

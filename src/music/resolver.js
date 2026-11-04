@@ -100,7 +100,8 @@ async function resolveSoundCloud(input, requester, limit, providers) {
   let lavalinkError = null;
   const lavalinkReady = lavalink?.enabled()
     && (typeof lavalink.available === 'function' ? await lavalink.available() : true);
-  if (lavalinkReady) {
+  const playlist = new URL(page).pathname.split('/').includes('sets');
+  if (lavalinkReady && !playlist) {
     try {
       return await resolveDirect(page, requester, limit, providers);
     } catch (error) {

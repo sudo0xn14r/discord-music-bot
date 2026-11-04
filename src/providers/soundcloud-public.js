@@ -83,11 +83,11 @@ async function resolvePublicSoundCloud(page, limit, fetchImpl = fetch) {
     return { tracks: [track], notice: null };
   }
   if (resource?.kind === 'playlist') {
-    const tracks = (resource.tracks || []).map(toMeta).filter(Boolean).slice(0, limit);
+    const tracks = await playlistTracks(resource, limit, clientId, fetchImpl);
     if (!tracks.length) throw userError('That SoundCloud playlist has no playable tracks.');
     const notes = [];
     const total = Number(resource.track_count) || (resource.tracks || []).length;
-    if (total > tracks.length) notes.push(`Only the first ${tracks.length} tracks were added.`);
+    if (total > limit) notes.push(`Only the first ${tracks.length} tracks were added.`);
     return { tracks, notice: notes.join(' ') || null };
   }
   if (resource?.kind === 'user') {
@@ -103,6 +103,25 @@ async function resolvePublicSoundCloud(page, limit, fetchImpl = fetch) {
     return { tracks, notice: `Playing the latest tracks from ${name}.` };
   }
   throw userError('Paste a SoundCloud track, playlist, or artist link.');
+}
+
+async function playlistTracks(resource, limit, clientId, fetchImpl) {
+  const ordered = (resource.tracks || []).slice(0, limit);
+  const missing = ordered.filter((item) => !toMeta(item) && item?.id != null);
+  const hydrated = new Map();
+  for (let index = 0; index < missing.length; index += 50) {
+    const ids = missing.slice(index, index + 50).map((item) => encodeURIComponent(item.id));
+    const body = await readResponse(
+      fetchImpl,
+      `${API}/tracks?ids=${ids.join(',')}&client_id=${clientId}`,
+      'application/json',
+    );
+    const list = JSON.parse(body);
+    for (const item of Array.isArray(list) ? list : []) {
+      if (item?.id != null) hydrated.set(String(item.id), item);
+    }
+  }
+  return ordered.map((item) => toMeta(item) || toMeta(hydrated.get(String(item.id)))).filter(Boolean);
 }
 
 function compactTitle(value) {
