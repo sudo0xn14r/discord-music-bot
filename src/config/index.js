@@ -98,7 +98,7 @@ function loadConfig() {
     providerOrder,
     idleMinutes: Math.max(0, integer('IDLE_MINUTES', 10)),
     uptimeUrl: readEnv('UPTIME_URL'),
-    playGifUrl: httpUrl('PLAY_GIF_URL') || 'https://static2.klipy.com/ii/4493325008d34b7bf8cd6813cd5c1619/b9/74/hVQsdDL1AY9DK.gif',
+    playGifUrl: httpUrl('PLAY_GIF_URL') || 'https://static.klipy.com/ii/4493325008d34b7bf8cd6813cd5c1619/b9/74/si19r6ANQyCsuvQT.gif',
   };
 }
 
