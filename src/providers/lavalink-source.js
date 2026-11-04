@@ -1,4 +1,6 @@
+const { openSoundCloudStream, soundCloudPlaybackPage } = require('../music/soundcloud-audio');
 const { createTrack } = require('../music/track');
+const { soundCloudMediaUrl } = require('./soundcloud-public');
 const { pickBestMatch, queryMatches } = require('./match');
 const { assertPublicUrl } = require('../util/http');
 const { log } = require('../util/log');
@@ -154,6 +156,19 @@ class LavalinkSource {
   }
 
   async playbackIdentifier(track) {
+    const page = soundCloudPlaybackPage(track);
+    if (page) {
+      try {
+        const mediaUrl = await soundCloudMediaUrl(page);
+        return openSoundCloudStream(mediaUrl);
+      } catch (error) {
+        if (error.userError) throw error;
+        log('error', 'SoundCloud audio could not be prepared', { error: error.message });
+        const failure = new Error('That SoundCloud track could not be played.');
+        failure.userError = true;
+        throw failure;
+      }
+    }
     if (!track.identifier) {
       const error = new Error('That track has no playable address.');
       error.userError = true;

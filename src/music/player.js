@@ -1,6 +1,7 @@
 const { UserError } = require('../errors');
 const { oneLine } = require('../format');
 const { bindPlayerEvents } = require('../lavalink/events');
+const { soundCloudPlaybackPage } = require('./soundcloud-audio');
 const { playerMessage } = require('../panel');
 const { log } = require('../util/log');
 const { GuildQueue, MAX_QUEUE } = require('./queue');
@@ -233,7 +234,7 @@ class GuildSession {
     while (this.queue.current && failures < MAX_CONSECUTIVE_FAILURES) {
       if (generation !== this.generation || this.leaving) return { dropped: true, skipped };
       const track = this.queue.current;
-      if (track.encoded) {
+      if (track.encoded && !soundCloudPlaybackPage(track)) {
         const played = await this.startTrack(track, track.encoded, generation, options, skipped);
         if (played) return played;
         track.encoded = null;

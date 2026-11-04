@@ -25,6 +25,24 @@ function bindPlayerEvents(player, session) {
       error: event?.exception?.message || 'unknown playback error',
       node: session.manager.lavalink?.getIdealNode?.()?.name,
     });
+    const started = session.playGeneration;
+    session.enqueue(async () => {
+      if (session.starting || session.leaving) return;
+      if (started === -1 || session.playGeneration !== started) return;
+      session.playGeneration = -1;
+      const failed = session.queue.current;
+      try {
+        await player.stopTrack();
+      } catch (error) {
+        log('error', 'playback failed', {
+          guildId: session.guildId,
+          source: failed?.source,
+          error: error.message,
+          node: session.manager.lavalink?.getIdealNode?.()?.name,
+        });
+      }
+      await session.advanceAfter('loadFailed');
+    });
   });
 
   player.on('stuck', () => {
@@ -65,7 +83,7 @@ function bindPlayerEvents(player, session) {
     session.positionMs = session.pendingSeekMs || 0;
     session.pendingSeekMs = 0;
     const length = event?.track?.info?.length;
-    if (session.queue.current && Number.isFinite(length) && length > 0) {
+    if (session.queue.current && Number.isFinite(length) && length > 0 && length < 24 * 60 * 60 * 1000) {
       session.queue.current.durationMs = length;
     }
     if (session.queue.current) {

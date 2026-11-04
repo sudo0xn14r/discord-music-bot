@@ -105,4 +105,47 @@ async function resolvePublicSoundCloud(page, limit, fetchImpl = fetch) {
   throw userError('Paste a SoundCloud track, playlist, or artist link.');
 }
 
-module.exports = { resolvePublicSoundCloud, resetSoundCloudClientId };
+async function soundCloudMediaUrl(page, fetchImpl = fetch) {
+  const clientId = await soundCloudClientId(fetchImpl);
+  let resource;
+  try {
+    resource = JSON.parse(await readResponse(
+      fetchImpl,
+      `${API}/resolve?url=${encodeURIComponent(page)}&client_id=${clientId}`,
+      'application/json',
+    ));
+  } catch (error) {
+    if (error.status === 404) throw userError('That SoundCloud track could not be played.');
+    throw error;
+  }
+  if (resource?.kind !== 'track') throw userError('That SoundCloud track could not be played.');
+  const list = resource.media?.transcodings || [];
+  const usable = list.filter((item) => (
+    item?.url
+    && item.snipped !== true
+    && item.format?.protocol === 'hls'
+    && String(item.format?.mime_type || '').startsWith('audio/mp4')
+  ));
+  const chosen = usable.find((item) => item.preset === 'aac_160k') || usable[0];
+  if (!chosen) throw userError('SoundCloud does not make that track available.');
+  const separator = chosen.url.includes('?') ? '&' : '?';
+  let media;
+  try {
+    media = JSON.parse(await readResponse(
+      fetchImpl,
+      `${chosen.url}${separator}client_id=${clientId}`,
+      'application/json',
+    ));
+  } catch (error) {
+    if (error.status === 404) throw userError('SoundCloud does not make that track available.');
+    throw error;
+  }
+  if (!media?.url) throw userError('SoundCloud does not make that track available.');
+  return media.url;
+}
+
+module.exports = {
+  resolvePublicSoundCloud,
+  resetSoundCloudClientId,
+  soundCloudMediaUrl,
+};
