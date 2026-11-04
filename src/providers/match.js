@@ -24,6 +24,24 @@ function isYouTubeUrl(value) {
   return YOUTUBE_HOSTS.has(host);
 }
 
+function youtubeVideoId(value) {
+  let url;
+  try {
+    url = new URL(String(value || '').trim());
+  } catch {
+    return null;
+  }
+  const host = url.hostname.toLowerCase().replace(/^www\./, '');
+  if (!YOUTUBE_HOSTS.has(host)) return null;
+  const fromQuery = url.searchParams.get('v');
+  if (fromQuery && /^[\w-]{11}$/.test(fromQuery)) return fromQuery;
+  const parts = url.pathname.split('/').filter(Boolean);
+  const id = host === 'youtu.be'
+    ? parts[0]
+    : parts[/^(shorts|embed|live|v)$/.test(parts[0]) ? 1 : -1];
+  return id && /^[\w-]{11}$/.test(id) ? id : null;
+}
+
 function isSpotifyUrl(value) {
   if (!isHttpUrl(value)) return false;
   const host = hostOf(value);
@@ -168,6 +186,7 @@ function spotifyTarget(input) {
 module.exports = {
   isHttpUrl,
   isYouTubeUrl,
+  youtubeVideoId,
   isSpotifyUrl,
   isSoundCloudUrl,
   isBandcampUrl,

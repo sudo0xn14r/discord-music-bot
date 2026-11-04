@@ -201,6 +201,60 @@ function youtubeNode(hits) {
   return { youtube, identifiers };
 }
 
+test('a blocked youtube watch page plays the search result for that video', async () => {
+  const identifiers = [];
+  const youtube = new YoutubeProvider(() => ({
+    rest: {
+      async resolve(identifier) {
+        identifiers.push(identifier);
+        if (String(identifier).startsWith('ytsearch:')) {
+          return {
+            loadType: 'search',
+            data: [{
+              encoded: 'encoded-track',
+              info: {
+                title: 'Haroun',
+                author: 'El Rass',
+                length: 180000,
+                uri: 'https://www.youtube.com/watch?v=-q7_fmVGHEw',
+              },
+            }],
+          };
+        }
+        return { loadType: 'error', data: { message: 'This video requires login.' } };
+      },
+    },
+  }), true);
+  const result = await youtube.resolveUrl('https://youtu.be/-q7_fmVGHEw', 'Nizar');
+  assert.equal(result.tracks[0].encoded, 'encoded-track');
+  assert.equal(result.tracks[0].title, 'Haroun');
+  assert.equal(result.tracks[0].requester, 'Nizar');
+  assert.equal(identifiers.some((item) => item.startsWith('ytsearch:')), true);
+});
+
+test('a blocked youtube link is not replaced with a different video', async () => {
+  const youtube = new YoutubeProvider(() => ({
+    rest: {
+      async resolve(identifier) {
+        if (String(identifier).startsWith('ytsearch:')) {
+          return {
+            loadType: 'search',
+            data: [{
+              encoded: 'other',
+              info: { title: 'Other', author: 'Someone', length: 1000, uri: 'https://www.youtube.com/watch?v=aaaaaaaaaaa' },
+            }],
+          };
+        }
+        return { loadType: 'error', data: { message: 'This video requires login.' } };
+      },
+    },
+  }), true);
+  await assert.rejects(
+    () => youtube.resolveUrl('https://www.youtube.com/watch?v=bbbbbbbbbbb', 'Nizar'),
+    (error) => error.userError && /could not be played/.test(error.message),
+  );
+});
+
 test('youtube search uses ytsearch and falls back to the top result', async () => {
   const { youtube, identifiers } = youtubeNode([
     { info: { title: 'Unrelated Mix', author: 'Other', length: 1000, uri: 'https://www.youtube.com/watch?v=aaa' } },

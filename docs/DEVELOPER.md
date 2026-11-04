@@ -281,7 +281,7 @@ A playback provider is expected to implement:
 
 ### youtube
 
-`YoutubeProvider` extends `LavalinkSource`. Enabled when `youtube` is in `PROVIDER_ORDER`. `searchPrefix` is `ytsearch:`. `allowsLooseMatch` is true, so this is the only provider `searchLoose` will ask. `source` on every track it builds is `youtube`. A search result keeps Lavalink's encoded track and plays that directly. The watch URL is resolved again only when that encoded value is missing, which is what a saved playlist has after a restart.
+`YoutubeProvider` extends `LavalinkSource`. Enabled when `youtube` is in `PROVIDER_ORDER`. `searchPrefix` is `ytsearch:`. `allowsLooseMatch` is true, so this is the only provider `searchLoose` will ask. `source` on every track it builds is `youtube`. A search result keeps Lavalink's encoded track and plays that directly. If Lavalink cannot open a watch page, the provider looks the video id up through `ytsearch` and plays that result instead of a different video. The watch URL is resolved again only when that encoded value is missing, which is what a saved playlist has after a restart.
 
 ### local
 
