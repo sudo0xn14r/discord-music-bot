@@ -71,6 +71,29 @@ test('move and remove use 1-based positions', () => {
   assert.equal(queue.move(1, 9), null);
 });
 
+test('another add keeps the songs already queued', () => {
+  const queue = new GuildQueue('1');
+  queue.enqueue([track('A'), track('B'), track('C')]);
+  queue.shiftNext();
+  queue.enqueue([track('D')]);
+  assert.equal(queue.current.title, 'A');
+  assert.deepEqual(queue.upcoming.map((item) => item.title), ['B', 'C', 'D']);
+  assert.deepEqual(queue.position(), { index: 1, total: 4 });
+});
+
+test('skip to a later track keeps that track number', () => {
+  const queue = new GuildQueue('1');
+  queue.enqueue([track('A'), track('B'), track('C'), track('D'), track('E')]);
+  queue.shiftNext();
+  assert.equal(queue.skipTo(4).title, 'D');
+  queue.shiftNext();
+  assert.equal(queue.current.title, 'D');
+  assert.deepEqual(queue.position(), { index: 4, total: 5 });
+  assert.equal(queue.upcomingIndex(5), 1);
+  assert.equal(queue.skipTo(4), null);
+  assert.equal(queue.current.title, 'D');
+});
+
 test('shuffle keeps every queued track and reset turns loop off', () => {
   const queue = new GuildQueue('1');
   queue.enqueue([track('A'), track('B'), track('C'), track('D')]);

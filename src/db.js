@@ -72,9 +72,11 @@ function openDatabase(filePath) {
       filter_name TEXT NOT NULL DEFAULT 'off',
       current_json TEXT,
       upcoming_json TEXT NOT NULL DEFAULT '[]',
+      played_count INTEGER NOT NULL DEFAULT 0,
       updated_at INTEGER NOT NULL
     );
   `);
+  ensureColumn(db, 'playback', 'played_count', 'INTEGER NOT NULL DEFAULT 0');
   return new BotDatabase(db);
 }
 
@@ -119,8 +121,8 @@ class BotDatabase {
     this.db.prepare(`
       INSERT INTO playback (
         guild_id, channel_id, text_channel_id, position_ms, paused, loop_mode, volume,
-        filter_name, current_json, upcoming_json, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        filter_name, current_json, upcoming_json, played_count, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(guild_id) DO UPDATE SET
         channel_id = excluded.channel_id,
         text_channel_id = excluded.text_channel_id,
@@ -131,6 +133,7 @@ class BotDatabase {
         filter_name = excluded.filter_name,
         current_json = excluded.current_json,
         upcoming_json = excluded.upcoming_json,
+        played_count = excluded.played_count,
         updated_at = excluded.updated_at
     `).run(
       guildId,
@@ -143,6 +146,7 @@ class BotDatabase {
       state.filter || 'off',
       state.current ? JSON.stringify(state.current) : null,
       JSON.stringify(state.upcoming || []),
+      Number.isInteger(state.played) ? state.played : 0,
       Date.now(),
     );
   }
@@ -155,7 +159,7 @@ class BotDatabase {
     return this.db.prepare(`
       SELECT guild_id AS guildId, channel_id AS channelId, text_channel_id AS textChannelId,
         position_ms AS positionMs, paused, loop_mode AS loopMode, volume, filter_name AS filter,
-        current_json AS currentJson, upcoming_json AS upcomingJson
+        current_json AS currentJson, upcoming_json AS upcomingJson, played_count AS played
       FROM playback
     `).all().map((row) => ({
       ...row,

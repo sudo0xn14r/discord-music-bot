@@ -1,9 +1,12 @@
 const { UserError } = require('../errors');
+const { createTrack } = require('./track');
 const {
   durationCompatible,
   linkKind,
   titlesMatch,
 } = require('../providers/match');
+const { canonicalSoundCloudUrl } = require('../providers/soundcloud-link');
+const { resolvePublicSoundCloud } = require('../providers/soundcloud-public');
 
 function playbackNames(providers) {
   const names = providers.playbackProviders().map((provider) => provider.label);
@@ -30,7 +33,8 @@ function attachRequester(track, requester, matchedFrom) {
 
 async function resolveCatalog(input, requester, limit, providers, providerName) {
   const provider = providers.get(providerName);
-  if (!provider || !provider.enabled()) {
+  const ready = provider && (typeof provider.canResolve === 'function' ? provider.canResolve() : provider.enabled());
+  if (!ready) {
     throw new UserError(`${provider?.label || 'That source'} is not configured.`);
   }
   let metadata;
@@ -72,8 +76,8 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
     throw new UserError(`I couldn't find a match for that ${provider.label} link in ${names}. Nothing else was substituted.`);
   }
   const notes = [];
-  if (looseCount) {
-    notes.push(`${looseCount} track${looseCount === 1 ? '' : 's'} used the top search result because there was no close match.`);
+  if (looseCount > 1) {
+    notes.push(`${looseCount} tracks used the top search result because there was no close match.`);
   }
   if (unmatched) {
     notes.push(`${unmatched} ${provider.label} track${unmatched === 1 ? '' : 's'} had no match and ${unmatched === 1 ? 'was' : 'were'} skipped.`);
@@ -82,6 +86,77 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
     notes.push(`Only the first ${selected.length} tracks were checked.`);
   }
   return { tracks, unmatched, notice: notes.join(' ') || null };
+}
+
+async function resolveSoundCloud(input, requester, limit, providers) {
+  let page;
+  try {
+    page = await canonicalSoundCloudUrl(input);
+  } catch (error) {
+    throw new UserError(error.userError ? error.message : 'That SoundCloud link could not be opened.');
+  }
+  const lavalink = providers.get('lavalink');
+  const official = providers.get('soundcloud');
+  let lavalinkError = null;
+  const lavalinkReady = lavalink?.enabled()
+    && (typeof lavalink.available === 'function' ? await lavalink.available() : true);
+  const playlist = new URL(page).pathname.split('/').includes('sets');
+  if (lavalinkReady && !playlist) {
+    try {
+      return await resolveDirect(page, requester, limit, providers);
+    } catch (error) {
+      lavalinkError = error;
+    }
+  }
+  try {
+    const resolved = await resolvePublicSoundCloud(page, limit);
+    return {
+      tracks: resolved.tracks.map((item) => attachRequester(createTrack({
+        title: item.title,
+        artist: item.artist,
+        durationMs: item.durationMs,
+        source: 'lavalink',
+        pageUrl: item.pageUrl,
+        identifier: item.pageUrl,
+      }), requester)),
+      unmatched: 0,
+      notice: resolved.notice,
+    };
+  } catch (error) {
+    if (!(error.userError || error instanceof UserError)) {
+      console.error(`[provider:soundcloud] ${error.message}`);
+    } else if (!official?.enabled()) {
+      throw error instanceof UserError ? error : new UserError(error.message);
+    }
+  }
+  if (!official?.enabled()) {
+    if (lavalinkError instanceof UserError && /could not be played|did not have playable|not connected|still starting/.test(lavalinkError.message)) {
+      throw new UserError(/not connected|still starting/.test(lavalinkError.message)
+        ? 'The audio server is still starting. Try again in a moment.'
+        : 'That SoundCloud link could not be played.');
+    }
+    if (!lavalink?.enabled()) {
+      throw new UserError('SoundCloud playback is disabled. Leave lavalink in PROVIDER_ORDER.');
+    }
+    throw lavalinkError instanceof UserError ? lavalinkError : new UserError('That SoundCloud link could not be played.');
+  }
+  let result;
+  try {
+    result = await official.resolveUrl(page, requester, limit);
+  } catch (error) {
+    console.error(`[provider:soundcloud] ${error.message}`);
+    throw new UserError(official.friendly(error));
+  }
+  const notes = [];
+  if (result.truncated) notes.push(`Only the first ${limit} tracks were added.`);
+  if (result.restricted) {
+    notes.push(`${result.restricted} SoundCloud track${result.restricted === 1 ? '' : 's'} could not be streamed and ${result.restricted === 1 ? 'was' : 'were'} skipped.`);
+  }
+  return {
+    tracks: result.tracks.map((track) => attachRequester(track, requester)),
+    unmatched: 0,
+    notice: notes.join(' ') || null,
+  };
 }
 
 async function resolveDirect(input, requester, limit, providers, providerName = 'lavalink') {
@@ -118,7 +193,10 @@ async function resolveRequest(query, requester, limit, providers) {
   if (kind === 'youtube') {
     return resolveDirect(input, requester, limit, providers, 'youtube');
   }
-  if (kind === 'soundcloud' || kind === 'bandcamp' || kind === 'twitch' || kind === 'vimeo' || kind === 'http') {
+  if (kind === 'soundcloud') {
+    return resolveSoundCloud(input, requester, limit, providers);
+  }
+  if (kind === 'bandcamp' || kind === 'twitch' || kind === 'vimeo' || kind === 'http') {
     return resolveDirect(input, requester, limit, providers);
   }
   const local = providers.get('local');

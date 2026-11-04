@@ -11,7 +11,7 @@ Lavalink is the player. YouTube, SoundCloud, Bandcamp, Twitch, Vimeo, public HTT
 - **SoundCloud, Bandcamp, Twitch, and Vimeo** links through Lavalink. None of these ask for a cookie or a user login.
 - **Public HTTP and HTTPS streams.** Private hosts, localhost, and link-local addresses are refused.
 - **SoundCloud search** when `soundcloud` or `lavalink` is in `PROVIDER_ORDER`. The official API still needs a SoundCloud developer app. Lavalink's own SoundCloud search does not.
-- **Spotify, Apple Music, and Deezer links** for title, artist, album, and duration. Spotify uses a developer app when `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are set. Apple Music uses the public iTunes lookup. Deezer uses the public Deezer API. None of those three are streamed. The LavaSrc plugin turns a Spotify link Lavalink loads itself into a YouTube search, then SoundCloud. Its Apple Music, Deezer, and YouTube audio sources stay off.
+- **Spotify, Apple Music, and Deezer links** for title, artist, album, and duration. Spotify uses a developer app when `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are set, and the public Spotify page when that app refuses. Apple Music uses the public iTunes lookup. Deezer uses the public Deezer API. None of those three are streamed. The LavaSrc plugin turns a Spotify link Lavalink loads itself into a YouTube search, then SoundCloud. Its Apple Music, Deezer, and YouTube audio sources stay off.
 
 YouTube playback goes against YouTube's terms of service. For a private server that is usually tolerated, and it is your risk. YouTube also breaks often. If Lavalink logs "sign in to confirm you're not a bot", set a poToken or a YouTube OAuth refresh token on a burner account in `lavalink/application.yml`. The plugin needs regular updates. This config downloads the current youtube-source snapshot `2be8e542d3f6f178e048dca565892684c2e40177`, because release 1.18.2 is rejected with "The page needs to be reloaded." Stream addresses are deciphered by the public cipher at `https://cipher.kikkia.dev/`, because the plugin cannot read the current player script itself.
 
@@ -91,9 +91,11 @@ The bot reconnects if Lavalink drops, and Lavalink session resume is enabled. Th
    Connect and Speak alone (`permissions=3145728`) still run the slash commands.
 4. Join a voice channel and use `/play`.
 
-Commands: `/play`, `/playnow`, `/pause`, `/resume`, `/skip`, `/stop`, `/clear`, `/queue`, `/nowplaying`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter`, `/djrole`, `/playlist`, `/history`, `/stats`.
+Commands: `/play`, `/k2`, `/playnow`, `/pause`, `/resume`, `/skip`, `/skipto`, `/stop`, `/clear`, `/queue`, `/nowplaying`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter`, `/djrole`, `/playlist`, `/history`, `/stats`.
 
-The player is an embed with a progress bar. Buttons are Pause, Skip, Loop, Shuffle, Stop, and Previous. `/queue` pages through the upcoming songs. `/loop` is `off`, `track`, or `queue`. `/seek` takes seconds or `1:30`. `/filter` is `bassboost`, `nightcore`, or `off`. `/clear` removes upcoming songs and leaves the current one playing. `/playnow` interrupts the current song and keeps the rest of the queue.
+`/k2` is the same command as `/play`. When a song starts, the bot posts the Among Us GIF from Klipy. Set `PLAY_GIF_URL` to a different direct `.gif` link to change it. Queuing behind a song that is already playing does not post it again.
+
+The player is one embed. It shows the track number, the progress, and the next songs, and that same message updates when the song changes or someone adds to the queue. Adding a song keeps the songs already queued. `/skipto` jumps to a track number from that embed. Buttons are Pause, Skip, Loop, Shuffle, Stop, and Previous. `/queue` pages through the upcoming songs. `/loop` is `off`, `track`, or `queue`. `/seek` takes seconds or `1:30`. `/filter` is `bassboost`, `nightcore`, or `off`. `/clear` removes upcoming songs and leaves the current one playing. `/playnow` interrupts the current song and keeps the rest of the queue.
 
 `/stats` shows how many times songs have started, who requested them, and how long was actually heard. The totals are for this server. `/history` is only the latest plays.
 

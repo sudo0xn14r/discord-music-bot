@@ -30,6 +30,10 @@ test('spotify targets keep the id from urls and uris', () => {
 });
 
 test('no-login links are classified and catalog links stay metadata', () => {
+  assert.equal(linkKind('https://soundcloud.com/artist/track'), 'soundcloud');
+  assert.equal(linkKind('https://m.soundcloud.com/artist/track'), 'soundcloud');
+  assert.equal(linkKind('https://on.soundcloud.com/AbCd12'), 'soundcloud');
+  assert.equal(linkKind('https://snd.sc/AbCd12'), 'soundcloud');
   assert.equal(linkKind('https://artist.bandcamp.com/track/song'), 'bandcamp');
   assert.equal(linkKind('https://www.twitch.tv/videos/123'), 'twitch');
   assert.equal(linkKind('https://vimeo.com/123'), 'vimeo');
@@ -50,6 +54,14 @@ test('title matching rejects a different song', () => {
   assert.equal(titlesMatch(wanted, { title: 'Not Like Us (Official Audio)', artist: 'Kendrick Lamar' }), true);
   assert.equal(titlesMatch(wanted, { title: 'HUMBLE.', artist: 'Kendrick Lamar' }), false);
   assert.equal(titlesMatch(wanted, { title: 'Not Like Us', artist: 'Someone Else' }), false);
+  assert.equal(titlesMatch(
+    { title: 'Sodium', artist: 'Bones' },
+    { title: 'Bones - Sodium', artist: 'TeamSESH' },
+  ), true);
+  assert.equal(titlesMatch(
+    { title: 'Sodium', artist: 'Bones' },
+    { title: 'Sodium', artist: 'Someone Else' },
+  ), false);
   assert.equal(titlesMatch(
     { title: 'Not Like Us Kendrick Live Set', artist: 'Kendrick Lamar' },
     { title: 'Not Like Us', artist: 'Kendrick Lamar' },

@@ -1,4 +1,6 @@
+const { openSoundCloudStream, soundCloudPlaybackPage } = require('../music/soundcloud-audio');
 const { createTrack } = require('../music/track');
+const { soundCloudMediaUrl } = require('./soundcloud-public');
 const { pickBestMatch, queryMatches } = require('./match');
 const { assertPublicUrl } = require('../util/http');
 const { log } = require('../util/log');
@@ -103,7 +105,20 @@ class LavalinkSource {
     return pickBestMatch(metadata, candidates);
   }
 
+  async waitForNode() {
+    const started = Date.now();
+    while (Date.now() - started <= 20000) {
+      const node = this.getNode();
+      if (node) return node;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const error = new Error('The audio server is still starting. Try again in a moment.');
+    error.userError = true;
+    throw error;
+  }
+
   async resolveUrl(input, requester, limit = 50) {
+    await this.waitForNode();
     const identifier = canonicalIdentifier(input);
     const response = await this.load(identifier);
     if (!response || response.loadType === 'empty') {
@@ -141,6 +156,19 @@ class LavalinkSource {
   }
 
   async playbackIdentifier(track) {
+    const page = soundCloudPlaybackPage(track);
+    if (page) {
+      try {
+        const mediaUrl = await soundCloudMediaUrl(page);
+        return openSoundCloudStream(mediaUrl);
+      } catch (error) {
+        if (error.userError) throw error;
+        log('error', 'SoundCloud audio could not be prepared', { error: error.message });
+        const failure = new Error('That SoundCloud track could not be played.');
+        failure.userError = true;
+        throw failure;
+      }
+    }
     if (!track.identifier) {
       const error = new Error('That track has no playable address.');
       error.userError = true;

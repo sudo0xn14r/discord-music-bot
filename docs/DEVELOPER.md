@@ -73,7 +73,7 @@ Lavalink on 127.0.0.1:2333
 
 Lavalink does not choose policy. The bot decides what identifier to hand it. Lavalink's built-in YouTube and SoundCloud sources are off in `application.yml`. YouTube is played by youtube-source snapshot `2be8e542d3f6f178e048dca565892684c2e40177` (`ytsearch:` and YouTube URLs). Release 1.18.2 is rejected with "The page needs to be reloaded." The plugin sends scrambled stream addresses to `https://cipher.kikkia.dev/` because it cannot extract the signature function from the current player script. SoundCloud search and SoundCloud links are played by the soundy plugin (`scsearch` and SoundCloud URLs, no account). Bandcamp, Twitch, Vimeo, HTTP, and local stay on as Lavalink built-ins.
 
-The plugin config enables search, direct video ids, and direct playlist ids. Clients are tried in order: `MUSIC`, `ANDROID_VR`, `WEB`, `WEBEMBEDDED`. `MUSIC` does not play audio. It covers YouTube Music search. The others can play. `youtubePlaylistLoadLimit` is 50, which the plugin still reads, so a pasted playlist can fill the queue. `youtubeSearchEnabled` stays false because that flag belongs to the built-in source.
+The plugin config enables search, direct video ids, and direct playlist ids. Clients are tried in order: `MUSIC`, `TV`, `ANDROID_VR`, `WEB`, `WEBEMBEDDED`. `MUSIC` does not play audio. It covers YouTube Music search. `TV` is the client that uses a YouTube sign-in. The others can play without one. `youtubePlaylistLoadLimit` is 50, which the plugin still reads, so a pasted playlist can fill the queue. `youtubeSearchEnabled` stays false because that flag belongs to the built-in source.
 
 OAuth is off. A refresh token or a poToken is only needed when YouTube answers with "sign in to confirm you're not a bot". The commented `oauth.refreshToken` and `pot` blocks in `application.yml` read `YOUTUBE_REFRESH_TOKEN`, `YOUTUBE_POTOKEN`, and `YOUTUBE_VISITOR_DATA` from the environment. Use a burner account. Do not enable OAuth and a poToken together.
 
@@ -140,13 +140,14 @@ There is one Lavalink node, named `main`. Shoukaku options in `src/lavalink/clie
 | `LOCAL_MUSIC_DIR` | no | `music` | Resolved from the repo root |
 | `DATABASE_PATH` | no | `data/bot.sqlite` | Resolved from the repo root |
 | `IDLE_MINUTES` | no | `10` | `0` disables auto-leave |
+| `PLAY_GIF_URL` | no | Among Us Klipy GIF | Direct http(s) GIF posted when `/play`, `/k2`, or `/playnow` starts a song. The page `https://klipy.com/gifs/amongla-among-us-2` is not used; the file URL is. |
 | `UPTIME_URL` | no | empty | GET every 30 seconds |
 | `SOUNDCLOUD_CLIENT_ID` | no | empty | Official API stays off without it |
 | `SOUNDCLOUD_CLIENT_SECRET` | no | empty | Used only to refresh the OAuth token |
 | `SPOTIFY_CLIENT_ID` | no | empty | Both Spotify values are required |
 | `SPOTIFY_CLIENT_SECRET` | no | empty | Also read by Lavalink if its unit loads `.env` |
 
-`spotify`, `apple`, and `deezer` in `PROVIDER_ORDER` log a warning and are removed from the playback order. Any other unknown name logs a warning and is skipped. Apple Music and Deezer metadata do not use keys. They are always "enabled" as catalogs. Spotify metadata turns on only when both Spotify variables are set. YouTube does not need a key. Remove `youtube` from `PROVIDER_ORDER` to disable it.
+`spotify`, `apple`, and `deezer` in `PROVIDER_ORDER` log a warning and are removed from the playback order. Any other unknown name logs a warning and is skipped. Apple Music and Deezer metadata do not use keys. They are always "enabled" as catalogs. Spotify metadata uses the Web API when both Spotify variables are set. If that app refuses the lookup, or the variables are empty, the bot reads the public Spotify page instead. YouTube does not need a key. Remove `youtube` from `PROVIDER_ORDER` to disable it.
 
 Startup prints one `[provider]` line per provider from `ProviderManager.describe()`.
 
@@ -164,7 +165,7 @@ With a role stored:
 
 | Anyone in the voice channel | DJ role or Manage Server |
 | --- | --- |
-| `/play`, `/pause`, `/resume`, `/skip`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
+| `/play`, `/k2`, `/pause`, `/resume`, `/skip`, `/skipto`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
 | Buttons Pause/Resume, Skip, Previous, queue pages | Buttons Stop, Loop, Shuffle |
 
 `/djrole` itself stays Manage Server only, role or not.
@@ -176,7 +177,8 @@ With a role stored:
 | `/play query` | Resolve a song name or a YouTube, SoundCloud, Bandcamp, Spotify, Apple, or Deezer link. Join, append. Starts playback only if nothing is current. |
 | `/playnow query` | DJ. Insert at the front, stop the current track, start the new one. The rest of the queue is kept, trimmed to 50. |
 | `/pause`, `/resume` | `setPaused` on the Lavalink player. |
-| `/skip` | Stop, advance, edit the panel. |
+| `/skip` | Stop, advance, and edit the existing player embed. |
+| `/skipto number` | Drop the upcoming songs before that track number, then play it. The number is the one shown in the player. |
 | `/stop` | DJ. Clear queue, memory history, and loop. Leave voice. |
 | `/leave` | DJ. Same path as stop, different reply text. |
 | `/clear` | DJ. Drop upcoming tracks. Current keeps playing. |
@@ -194,7 +196,7 @@ With a role stored:
 | `/stats` | Play counts and listened time for this guild: overall, top 5 songs, top 5 requesters. |
 | `/djrole role` | Set or clear. Empty role clears. Reply is ephemeral. |
 
-`/play` and `/playlist load` defer, then edit. The resulting message becomes the panel (`notePanel`). Other successful commands that change playback either edit that panel (`refreshPanel`) or reply with a fresh one.
+`/play`, `/k2`, and `/playlist load` defer, then edit. `/k2` calls the same handler as `/play`. The resulting message becomes the panel (`notePanel`). When the command starts playback, a follow-up message contains the play GIF so Discord can animate it. The default is the direct file for the Klipy Among Us GIF. `PLAY_GIF_URL` replaces that default. Queuing behind a current song does not post the GIF. Other successful commands that change playback either edit that panel (`refreshPanel`) or reply with a fresh one. The panel edit does not include the GIF, so later button updates do not remove it.
 
 Errors:
 
@@ -216,7 +218,8 @@ query
   |-- spotify URL or spotify: URI   catalog provider, then findMatch, then YouTube top hit
   |-- music.apple.com               catalog provider, then findMatch, then YouTube top hit
   |-- deezer.com                    catalog provider, then findMatch, then YouTube top hit
-  |-- soundcloud.com                Lavalink resolve of that URL
+  |-- soundcloud.com, on.soundcloud.com, snd.sc
+                                    expand to a soundcloud.com track or playlist, then Lavalink
   |-- *.bandcamp.com                Lavalink resolve of that URL
   |-- twitch.tv                     Lavalink resolve of that URL
   |-- vimeo.com                     Lavalink resolve of that URL
@@ -227,7 +230,7 @@ query
 
 YouTube hosts are `youtube.com`, `youtu.be`, `music.youtube.com`, `m.youtube.com`, and `youtube-nocookie.com`. Those URLs go to `YoutubeProvider.resolveUrl`, which asks Lavalink to load the URL. The track `source` is `youtube`, not `lavalink`. If `youtube` is missing from `PROVIDER_ORDER`, the command errors and tells the user to add it.
 
-Direct SoundCloud, Bandcamp, Twitch, Vimeo, and other http(s) links do not use the official SoundCloud provider. `SoundCloudProvider.resolveUrl` exists, but the resolver always sends those URLs to `LavalinkSource`. Official SoundCloud is used for text search and for catalog matching.
+`m.soundcloud.com`, `on.soundcloud.com`, and `snd.sc` are turned into `https://soundcloud.com/...` before playback. Short links are followed only while they stay on SoundCloud. The soundy plugin can load a track or set when the audio server is connected. Playback does not use that plugin's stream. The bot reads the public SoundCloud page, transcodes the track with ffmpeg, and gives Lavalink a local MP3 stream. ffmpeg has to be installed on the same machine as the bot. If that load fails, or the server is down, the public SoundCloud page still supplies the track list. An artist profile plays that artist's latest tracks, up to the queue limit. Bandcamp, Twitch, Vimeo, and other http(s) links still go straight to `LavalinkSource`. Official `SoundCloudProvider.resolveUrl` is the last fallback, and only when `SOUNDCLOUD_CLIENT_ID` is set. Official SoundCloud search remains the text-search and catalog-matching path.
 
 The `limit` passed in is the number of free queue slots for `/play`, or 50 for `/playnow`. Catalog and playlist expansion stop at that limit. A notice is attached when tracks were skipped for lack of a match or because the list was longer than the limit.
 
@@ -298,7 +301,7 @@ Search and match call `GET /tracks` with `access=playable` and `limit=8`. A trac
 
 `playbackIdentifier` re-fetches the track and returns a public HTTPS stream URL from `resolveAudioUrl`. That function follows up to five redirects. A JSON or JavaScript body must contain a `url` string. The final URL has to be HTTPS and public. `client_id`, `client_secret`, and `access_token` query parameters are stripped before the URL is returned. Lavalink's HTTP source then fetches that URL. Seeking a SoundCloud track can fail. Local files still seek.
 
-This provider's `resolveUrl` (`GET /resolve`) is not on the slash-command path. Direct SoundCloud links go to Lavalink.
+This provider's `resolveUrl` (`GET /resolve`) runs for a pasted SoundCloud link only after Lavalink fails, or when `lavalink` is not in `PROVIDER_ORDER`. The usual path is the soundy plugin.
 
 ### lavalink
 
@@ -437,7 +440,7 @@ The embed title is `Playing` or `Paused` plus the title. The description is arti
 
 Buttons: Pause or Resume, Skip, Loop, Shuffle, Stop, and Previous. Previous is disabled when the in-memory history stack is empty. Shuffle is disabled below two upcoming tracks. An empty player removes the components.
 
-`session.panel` remembers one channel id and message id. `refreshPanel` fetches and edits it. The first edit failure is logged. Later failures are not, so a deleted panel does not spam. The next `/play`, `/skip`, or `/nowplaying` points the panel at a new message.
+`session.panel` remembers one channel id and message id. `refreshPanel` fetches and edits it when the song changes, when someone adds to the queue, and about every 15 seconds while a song is playing. A later `/play` keeps that message when it is still there. The first edit failure is logged. A deleted message is forgotten so the next command can post a new panel.
 
 `/queue` is a separate message. It is not the panel. Page buttons update that message only.
 

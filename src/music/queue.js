@@ -11,6 +11,20 @@ class GuildQueue {
     this.volume = 100;
     this.loopMode = 'off';
     this.rememberCurrent = true;
+    this.played = 0;
+  }
+
+  position() {
+    const index = this.played + (this.current ? 1 : 0);
+    const total = index + this.upcoming.length;
+    return { index, total };
+  }
+
+  upcomingIndex(number) {
+    const { index } = this.position();
+    const at = number - index;
+    if (!Number.isInteger(number) || at < 1 || at > this.upcoming.length) return null;
+    return at;
   }
 
   freeSlots() {
@@ -42,10 +56,22 @@ class GuildQueue {
     if (this.current && this.rememberCurrent) {
       this.history.push(this.current);
       if (this.history.length > MAX_HISTORY) this.history.shift();
+      this.played += 1;
     }
     this.rememberCurrent = true;
     this.current = track;
     return track;
+  }
+
+  skipTo(position) {
+    if (!this.current) return null;
+    const here = this.played + 1;
+    const last = here + this.upcoming.length;
+    if (!Number.isInteger(position) || position <= here || position > last) return null;
+    const drop = position - here - 1;
+    this.upcoming.splice(0, drop);
+    this.played = position - 2;
+    return this.upcoming[0] || null;
   }
 
   previous() {
@@ -55,6 +81,7 @@ class GuildQueue {
     this.upcoming.unshift(prior);
     if (this.upcoming.length > MAX_QUEUE) this.upcoming.length = MAX_QUEUE;
     this.rememberCurrent = false;
+    if (this.played > 0) this.played -= 1;
     return prior;
   }
 
@@ -93,6 +120,7 @@ class GuildQueue {
     this.current = null;
     this.loopMode = 'off';
     this.rememberCurrent = true;
+    this.played = 0;
   }
 }
 

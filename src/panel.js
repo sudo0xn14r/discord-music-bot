@@ -19,12 +19,14 @@ function playerMessage(session, extra) {
     const lines = [];
     if (artist) lines.push(artist);
     lines.push(progressLine(session.positionMs, track.durationMs));
+    const place = session.queue?.position?.() || { index: 1, total: 1 + upcoming.length };
+    lines.push(`Track ${place.index} of ${place.total}`);
     const details = [`Loop ${session.queue?.loopMode || 'off'}`];
     if (session.filter && session.filter !== 'off') details.push(session.filter);
     lines.push(details.join(' · '));
-    const next = upcoming.slice(0, 3).map((item, index) => `${index + 1}. ${oneLine(item.title)}`);
+    const next = upcoming.slice(0, 5).map((item, index) => `${place.index + index + 1}. ${oneLine(item.title)}`);
     if (next.length) lines.push(next.join('\n'));
-    if (upcoming.length > 3) lines.push(`${upcoming.length - 3} more in /queue`);
+    if (upcoming.length > 5) lines.push(`${upcoming.length - 5} more in /queue`);
     embed
       .setTitle(`${session.paused ? 'Paused' : 'Playing'} · ${oneLine(track.title)}`)
       .setDescription(lines.join('\n').slice(0, 4000))
@@ -80,6 +82,10 @@ function playerMessage(session, extra) {
 function queueMessage(session, page = 0) {
   const pageSize = 10;
   const upcoming = session?.upcoming || [];
+  const place = session?.queue?.position?.() || {
+    index: session?.current ? 1 : 0,
+    total: (session?.current ? 1 : 0) + upcoming.length,
+  };
   const pages = Math.max(1, Math.ceil(upcoming.length / pageSize));
   const index = Math.min(pages - 1, Math.max(0, page));
   const start = index * pageSize;
@@ -89,12 +95,12 @@ function queueMessage(session, page = 0) {
     const artist = session.current.artist && session.current.artist !== 'Unknown artist'
       ? ` — ${oneLine(session.current.artist)}`
       : '';
-    lines.push(`Now: ${oneLine(session.current.title)}${artist} (${formatTrackLength(session.current.durationMs, session.positionMs)})`);
+    lines.push(`Now: ${oneLine(session.current.title)}${artist} (${formatTrackLength(session.current.durationMs, session.positionMs)}) · track ${place.index} of ${place.total}`);
   }
   if (!slice.length) lines.push('Nothing else is queued.');
   else {
     lines.push(slice.map((item, itemIndex) => (
-      `${start + itemIndex + 1}. ${oneLine(item.title)} (${formatTrackLength(item.durationMs)})`
+      `${place.index + start + itemIndex + 1}. ${oneLine(item.title)} (${formatTrackLength(item.durationMs)})`
     )).join('\n'));
   }
   if (pages > 1) lines.push(`Page ${index + 1} of ${pages}`);

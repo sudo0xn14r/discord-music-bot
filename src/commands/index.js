@@ -21,6 +21,11 @@ const play = guildOnly(new SlashCommandBuilder())
   .setDescription('Play a song name or a YouTube, SoundCloud, Bandcamp, Spotify, Apple, or Deezer link')
   .addStringOption(queryOption('Song name or a supported link'));
 
+const k2 = guildOnly(new SlashCommandBuilder())
+  .setName('k2')
+  .setDescription('Play a song, the same way as /play')
+  .addStringOption(queryOption('Song name or a supported link'));
+
 const playnow = guildOnly(new SlashCommandBuilder())
   .setName('playnow')
   .setDescription('Interrupt the current song and play this instead')
@@ -37,6 +42,15 @@ const resume = guildOnly(new SlashCommandBuilder())
 const skip = guildOnly(new SlashCommandBuilder())
   .setName('skip')
   .setDescription('Skip the current track');
+
+const skipto = guildOnly(new SlashCommandBuilder())
+  .setName('skipto')
+  .setDescription('Skip ahead to a track number shown in the player')
+  .addIntegerOption((option) => option
+    .setName('number')
+    .setDescription('Track number shown in the player')
+    .setRequired(true)
+    .setMinValue(1));
 
 const stop = guildOnly(new SlashCommandBuilder())
   .setName('stop')
@@ -138,13 +152,13 @@ const move = guildOnly(new SlashCommandBuilder())
   .setDescription('Move a queued song to another position')
   .addIntegerOption((option) => option
     .setName('from')
-    .setDescription('Current position in the queue')
+    .setDescription('Track number shown in the player')
     .setRequired(true)
     .setMinValue(1)
     .setMaxValue(MAX_QUEUE))
   .addIntegerOption((option) => option
     .setName('to')
-    .setDescription('New position in the queue')
+    .setDescription('New track number')
     .setRequired(true)
     .setMinValue(1)
     .setMaxValue(MAX_QUEUE));
@@ -154,7 +168,7 @@ const remove = guildOnly(new SlashCommandBuilder())
   .setDescription('Remove a song from the queue')
   .addIntegerOption((option) => option
     .setName('position')
-    .setDescription('Position in the queue')
+    .setDescription('Track number shown in the player')
     .setRequired(true)
     .setMinValue(1)
     .setMaxValue(MAX_QUEUE));
@@ -224,9 +238,9 @@ function matchNote(track) {
     lavalink: 'SoundCloud',
   }[track.source] || 'a playback source';
   if (track.loose) {
-    return `No close match, so this is the top ${where} result. ${from} audio is not streamed.`;
+    return `No close match on ${where} for this ${from} track, so this is the top result.`;
   }
-  return `Matched the ${from} metadata to ${where}. ${from} audio is not streamed.`;
+  return '';
 }
 
 function hasPermission(member, flag) {
@@ -312,8 +326,8 @@ async function executePlay(interaction, music, { now = false } = {}) {
     await interaction.editReply({ content: 'That play was interrupted.', allowedMentions: { parse: [] } });
     return;
   }
-  const message = await interaction.editReply(playerMessage(session, describeAdd(result, resolved.notice)));
-  session.notePanel(message);
+  await publishPlayer(interaction, session, describeAdd(result, resolved.notice));
+  await sendPlayGif(interaction, music, result);
 }
 
 function activeSession(interaction, music) {
@@ -343,8 +357,20 @@ async function executeSkip(interaction, music) {
   else if (outcome?.ok === false) lines.push(outcome.reason);
   else lines.push('The queue is empty.');
   lines.push(...session.skippedNotes(outcome));
-  const message = await interaction.editReply(playerMessage(session, lines.join('\n')));
-  session.notePanel(message);
+  await publishPlayer(interaction, session, lines.join('\n'));
+}
+
+async function executeSkipTo(interaction, music) {
+  const session = activeSession(interaction, music);
+  const number = interaction.options.getInteger('number', true);
+  await interaction.deferReply();
+  const { outcome } = await session.skipTo(number);
+  const lines = [];
+  if (outcome?.track) lines.push(`Playing **${oneLine(outcome.track.title)}**.`);
+  else if (outcome?.ok === false) lines.push(outcome.reason);
+  else lines.push('The queue is empty.');
+  lines.push(...session.skippedNotes(outcome));
+  await publishPlayer(interaction, session, lines.join('\n'));
 }
 
 async function executeStop(interaction, music) {
@@ -429,6 +455,9 @@ async function executeStats(interaction, music) {
 }
 
 async function replyWithPanel(interaction, session, text) {
+  if (session.panel && await session.refreshPanel(text)) {
+    return interaction.reply({ content: text, allowedMentions: { parse: [] } });
+  }
   const message = await interaction.reply({ ...playerMessage(session, text), fetchReply: true });
   session.notePanel(message);
 }
@@ -541,8 +570,24 @@ async function executePlaylist(interaction, music) {
     await interaction.editReply({ content: 'That play was interrupted.', allowedMentions: { parse: [] } });
     return;
   }
-  const message = await interaction.editReply(playerMessage(session, describeAdd(result, notice)));
+  await publishPlayer(interaction, session, describeAdd(result, notice));
+  await sendPlayGif(interaction, music, result);
+}
+
+async function publishPlayer(interaction, session, extra) {
+  const text = String(extra || 'Done.').slice(0, 2000);
+  if (session.panel && await session.refreshPanel(null)) {
+    await interaction.editReply({ content: text, embeds: [], components: [], allowedMentions: { parse: [] } });
+    return;
+  }
+  const message = await interaction.editReply(playerMessage(session, text));
   session.notePanel(message);
+}
+
+async function sendPlayGif(interaction, music, result) {
+  const gif = music?.config?.playGifUrl;
+  if (!gif || !result?.started || !result.outcome?.ok) return;
+  await interaction.followUp({ content: gif, allowedMentions: { parse: [] } });
 }
 
 async function executeButton(interaction, music) {
@@ -605,12 +650,16 @@ async function executeButton(interaction, music) {
   throw new UserError('That button is not available.');
 }
 
+const executePlayCommand = (interaction, music) => executePlay(interaction, music);
+
 const commands = [
-  { data: play, execute: (interaction, music) => executePlay(interaction, music) },
+  { data: play, execute: executePlayCommand },
+  { data: k2, execute: executePlayCommand },
   { data: playnow, execute: (interaction, music) => executePlay(interaction, music, { now: true }) },
   { data: pause, execute: executePause },
   { data: resume, execute: executeResume },
   { data: skip, execute: executeSkip },
+  { data: skipto, execute: executeSkipTo },
   { data: stop, execute: executeStop },
   { data: clear, execute: executeClear },
   { data: queue, execute: executeQueue },
@@ -629,4 +678,4 @@ const commands = [
   { data: djrole, execute: executeDjRole },
 ];
 
-module.exports = { commands, executeButton };
+module.exports = { commands, executeButton, sendPlayGif };

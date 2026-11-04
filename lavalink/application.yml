@@ -81,6 +81,8 @@ plugins:
       url: "https://cipher.kikkia.dev/"
     clients:
       - MUSIC
+      # TV is the client that uses the YouTube sign-in. Without it, OAuth is on and unused.
+      - TV
       - ANDROID_VR
       - WEB
       - WEBEMBEDDED

@@ -1,6 +1,7 @@
 const { UserError } = require('../errors');
 const { oneLine } = require('../format');
 const { bindPlayerEvents } = require('../lavalink/events');
+const { soundCloudPlaybackPage } = require('./soundcloud-audio');
 const { playerMessage } = require('../panel');
 const { log } = require('../util/log');
 const { GuildQueue, MAX_QUEUE } = require('./queue');
@@ -73,6 +74,7 @@ class GuildSession {
       filter: this.filter,
       current: this.queue.current,
       upcoming: this.queue.upcoming,
+      played: this.queue.played,
     };
   }
 
@@ -98,6 +100,7 @@ class GuildSession {
     this.lastPositionSave = now;
     this.touchListen();
     this.persist();
+    if (this.panel && this.queue.current) void this.refreshPanel(null);
   }
 
   beginListen(track) {
@@ -173,10 +176,15 @@ class GuildSession {
     this.panel = { channelId: message.channelId, messageId: message.id };
   }
 
-  node() {
-    const node = this.manager.lavalink.getIdealNode();
-    if (!node) throw new UserError('The audio server is not connected. Wait a moment and try again.');
-    return node;
+  async node() {
+    const started = Date.now();
+    while (Date.now() - started <= 20000) {
+      this.manager.lavalink.ensureConnected?.();
+      const node = this.manager.lavalink.getIdealNode();
+      if (node) return node;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new UserError('The audio server is still starting. Try again in a moment.');
   }
 
   async join(channelId, shardId) {
@@ -226,7 +234,7 @@ class GuildSession {
     while (this.queue.current && failures < MAX_CONSECUTIVE_FAILURES) {
       if (generation !== this.generation || this.leaving) return { dropped: true, skipped };
       const track = this.queue.current;
-      if (track.encoded) {
+      if (track.encoded && !soundCloudPlaybackPage(track)) {
         const played = await this.startTrack(track, track.encoded, generation, options, skipped);
         if (played) return played;
         track.encoded = null;
@@ -252,7 +260,8 @@ class GuildSession {
       }
       let response;
       try {
-        response = await this.node().rest.resolve(identifier);
+        const node = await this.node();
+        response = await node.rest.resolve(identifier);
       } catch (error) {
         log('error', 'playback failed', {
           guildId: this.guildId,
@@ -262,7 +271,10 @@ class GuildSession {
         });
         this.queue.current = null;
         this.queue.upcoming.unshift(track);
-        return { ok: false, reason: 'The audio server could not load that track.', skipped };
+        const reason = error instanceof UserError
+          ? error.message
+          : 'The audio server could not load that track.';
+        return { ok: false, reason, skipped };
       }
       if (!response || response.loadType !== 'track') {
         if (response?.loadType === 'error') {
@@ -347,7 +359,7 @@ class GuildSession {
         return {
           ...placed,
           started: false,
-          position: this.queue.upcoming.length - placed.accepted.length + 1,
+          position: this.queue.position().index + this.queue.upcoming.length - placed.accepted.length + 1,
           outcome: { ok: true, skipped: [] },
         };
       }
@@ -386,6 +398,32 @@ class GuildSession {
       this.queue.shiftNext();
       const outcome = await this.playCurrent(this.generation);
       return { skipped, outcome };
+    });
+  }
+
+  async skipTo(position) {
+    return this.enqueue(async () => {
+      if (!this.queue.current) throw new UserError('Nothing is playing right now.');
+      const { index, total } = this.queue.position();
+      if (position === index) throw new UserError('That song is already playing.');
+      if (!Number.isInteger(position) || position < index || position > total || this.queue.upcoming.length === 0) {
+        throw new UserError(total > index ? `Pick a track from ${index + 1} to ${total}.` : 'Nothing else is queued.');
+      }
+      const target = this.queue.skipTo(position);
+      if (!target) throw new UserError(total > index ? `Pick a track from ${index + 1} to ${total}.` : 'Nothing else is queued.');
+      this.generation += 1;
+      this.playGeneration = -1;
+      this.finishListen();
+      if (this.player) {
+        try {
+          await this.player.stopTrack();
+        } catch (error) {
+          console.error(`[player:${this.guildId}] skip failed: ${error.message}`);
+        }
+      }
+      this.queue.shiftNext();
+      const outcome = await this.playCurrent(this.generation);
+      return { skipped: target, outcome };
     });
   }
 
@@ -569,17 +607,26 @@ class GuildSession {
 
   async removeUpcoming(index) {
     return this.enqueue(async () => {
-      const track = this.queue.removeAt(index);
-      if (!track) throw new UserError('That queue number is not in the list.');
+      const at = this.queue.upcomingIndex(index);
+      const track = at ? this.queue.removeAt(at) : null;
+      if (!track) {
+        const { index: here, total } = this.queue.position();
+        throw new UserError(total > here ? `Pick a track from ${here + 1} to ${total}.` : 'Nothing else is queued.');
+      }
       return `Removed **${oneLine(track.title)}**.`;
     });
   }
 
   async moveUpcoming(from, to) {
     return this.enqueue(async () => {
-      const track = this.queue.move(from, to);
-      if (!track) throw new UserError('Those queue numbers are not in the list.');
-      return `Moved **${oneLine(track.title)}** to position ${to}.`;
+      const start = this.queue.upcomingIndex(from);
+      const end = this.queue.upcomingIndex(to);
+      const track = start && end ? this.queue.move(start, end) : null;
+      if (!track) {
+        const { index: here, total } = this.queue.position();
+        throw new UserError(total > here ? `Pick tracks from ${here + 1} to ${total}.` : 'Nothing else is queued.');
+      }
+      return `Moved **${oneLine(track.title)}** to track ${to}.`;
     });
   }
 
@@ -654,17 +701,20 @@ class GuildSession {
   }
 
   async refreshPanel(extra) {
-    if (!this.panel) return;
+    if (!this.panel) return false;
     try {
       const channel = await this.manager.client.channels.fetch(this.panel.channelId);
-      if (!channel?.messages?.fetch) return;
+      if (!channel?.messages?.fetch) return false;
       const message = await channel.messages.fetch(this.panel.messageId);
       await message.edit(playerMessage(this, extra));
+      return true;
     } catch (error) {
+      if (error?.code === 10008) this.panel = null;
       if (!this.panelErrorLogged) {
         console.error(`[panel] ${error.message}`);
         this.panelErrorLogged = true;
       }
+      return false;
     }
   }
 }
