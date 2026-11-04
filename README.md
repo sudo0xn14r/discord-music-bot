@@ -14,6 +14,8 @@ Lavalink is the player. SoundCloud, Bandcamp, Twitch, Vimeo, public HTTP streams
 
 A YouTube link gets: `YouTube isn't supported here, try a SoundCloud link or /play a song name`. Google treats datacenter addresses as suspicious, so account cookies are only a temporary patch and can get an account limited. YouTube stays unsupported on purpose.
 
+How the process, providers, queue, and database fit together is in [docs/DEVELOPER.md](docs/DEVELOPER.md).
+
 ## Requirements
 
 - Node.js 22.13 or newer (`node:sqlite` is built in; you may see an experimental warning)
