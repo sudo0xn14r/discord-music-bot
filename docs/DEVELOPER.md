@@ -218,7 +218,8 @@ query
   |-- spotify URL or spotify: URI   catalog provider, then findMatch, then YouTube top hit
   |-- music.apple.com               catalog provider, then findMatch, then YouTube top hit
   |-- deezer.com                    catalog provider, then findMatch, then YouTube top hit
-  |-- soundcloud.com                Lavalink resolve of that URL
+  |-- soundcloud.com, on.soundcloud.com, snd.sc
+                                    expand to a soundcloud.com track or playlist, then Lavalink
   |-- *.bandcamp.com                Lavalink resolve of that URL
   |-- twitch.tv                     Lavalink resolve of that URL
   |-- vimeo.com                     Lavalink resolve of that URL
@@ -229,7 +230,7 @@ query
 
 YouTube hosts are `youtube.com`, `youtu.be`, `music.youtube.com`, `m.youtube.com`, and `youtube-nocookie.com`. Those URLs go to `YoutubeProvider.resolveUrl`, which asks Lavalink to load the URL. The track `source` is `youtube`, not `lavalink`. If `youtube` is missing from `PROVIDER_ORDER`, the command errors and tells the user to add it.
 
-Direct SoundCloud, Bandcamp, Twitch, Vimeo, and other http(s) links do not use the official SoundCloud provider. `SoundCloudProvider.resolveUrl` exists, but the resolver always sends those URLs to `LavalinkSource`. Official SoundCloud is used for text search and for catalog matching.
+`m.soundcloud.com`, `on.soundcloud.com`, and `snd.sc` are turned into `https://soundcloud.com/...` before playback. Short links are followed only while they stay on SoundCloud. A profile URL with no track or playlist is refused. The soundy plugin then loads that track or set. Bandcamp, Twitch, Vimeo, and other http(s) links still go straight to `LavalinkSource`. Official `SoundCloudProvider.resolveUrl` is used only when Lavalink is disabled or the plugin cannot load the link, and only if `SOUNDCLOUD_CLIENT_ID` is set. Official SoundCloud search remains the text-search and catalog-matching path.
 
 The `limit` passed in is the number of free queue slots for `/play`, or 50 for `/playnow`. Catalog and playlist expansion stop at that limit. A notice is attached when tracks were skipped for lack of a match or because the list was longer than the limit.
 
@@ -300,7 +301,7 @@ Search and match call `GET /tracks` with `access=playable` and `limit=8`. A trac
 
 `playbackIdentifier` re-fetches the track and returns a public HTTPS stream URL from `resolveAudioUrl`. That function follows up to five redirects. A JSON or JavaScript body must contain a `url` string. The final URL has to be HTTPS and public. `client_id`, `client_secret`, and `access_token` query parameters are stripped before the URL is returned. Lavalink's HTTP source then fetches that URL. Seeking a SoundCloud track can fail. Local files still seek.
 
-This provider's `resolveUrl` (`GET /resolve`) is not on the slash-command path. Direct SoundCloud links go to Lavalink.
+This provider's `resolveUrl` (`GET /resolve`) runs for a pasted SoundCloud link only after Lavalink fails, or when `lavalink` is not in `PROVIDER_ORDER`. The usual path is the soundy plugin.
 
 ### lavalink
 

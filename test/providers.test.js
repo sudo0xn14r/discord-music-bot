@@ -370,6 +370,155 @@ test('spotify metadata is not replaced with an unrelated track', async () => {
   );
 });
 
+test('a soundcloud link plays the track and a set plays each track', async () => {
+  const seen = [];
+  const lavalink = {
+    name: 'lavalink',
+    label: 'SoundCloud',
+    canPlay: true,
+    enabled: () => true,
+    async resolveUrl(input, requester) {
+      seen.push(input);
+      const tracks = String(input).includes('/sets/')
+        ? [
+          createTrack({ title: 'One', artist: 'Artist', source: 'lavalink', requester, identifier: `${input}#1` }),
+          createTrack({ title: 'Two', artist: 'Artist', source: 'lavalink', requester, identifier: `${input}#2` }),
+        ]
+        : [createTrack({ title: 'Faded', artist: 'Alan Walker', source: 'lavalink', requester, identifier: input })];
+      return { tracks, restricted: 0, truncated: false };
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const manager = ProviderManager.fromList([lavalink], ['lavalink']);
+  const originalFetch = global.fetch;
+  global.fetch = async () => {
+    throw new Error('a full SoundCloud link does not need a lookup');
+  };
+  try {
+    const track = await resolveRequest('https://m.soundcloud.com/alanwalker/faded?si=tracking', 'Nizar', 5, manager);
+    assert.equal(seen[0], 'https://soundcloud.com/alanwalker/faded');
+    assert.equal(track.tracks[0].title, 'Faded');
+    assert.equal(track.tracks[0].requester, 'Nizar');
+    const set = await resolveRequest('https://soundcloud.com/artist/sets/night?utm_source=share', 'Nizar', 5, manager);
+    assert.equal(seen[1], 'https://soundcloud.com/artist/sets/night');
+    assert.deepEqual(set.tracks.map((item) => item.title), ['One', 'Two']);
+    const secret = await resolveRequest('https://soundcloud.com/artist/private?secret_token=s-abc&si=1', 'Nizar', 1, manager);
+    assert.equal(seen[2], 'https://soundcloud.com/artist/private?secret_token=s-abc');
+    assert.equal(secret.tracks[0].title, 'Faded');
+    await assert.rejects(
+      () => resolveRequest('https://soundcloud.com/artist', 'Nizar', 1, manager),
+      (error) => error instanceof UserError && /track or playlist/.test(error.message),
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('a soundcloud short link is opened before playback', async () => {
+  const seen = [];
+  const lavalink = {
+    name: 'lavalink',
+    label: 'SoundCloud',
+    canPlay: true,
+    enabled: () => true,
+    async resolveUrl(input) {
+      seen.push(input);
+      return {
+        tracks: [createTrack({ title: 'Sodium', artist: 'Bones', source: 'lavalink', identifier: input })],
+        restricted: 0,
+        truncated: false,
+      };
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const manager = ProviderManager.fromList([lavalink], ['lavalink']);
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    assert.equal(url, 'https://on.soundcloud.com/AbCd12');
+    return {
+      status: 302,
+      headers: { get: (name) => (name === 'location' ? 'https://soundcloud.com/bones/sodium?si=1' : null) },
+    };
+  };
+  try {
+    const result = await resolveRequest('https://on.soundcloud.com/AbCd12', 'Nizar', 1, manager);
+    assert.equal(seen[0], 'https://soundcloud.com/bones/sodium');
+    assert.equal(result.tracks[0].title, 'Sodium');
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('a soundcloud short link that leaves soundcloud is refused', async () => {
+  const lavalink = {
+    name: 'lavalink',
+    label: 'SoundCloud',
+    canPlay: true,
+    enabled: () => true,
+    async resolveUrl() {
+      throw new Error('should not play');
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const manager = ProviderManager.fromList([lavalink], ['lavalink']);
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({
+    status: 302,
+    headers: { get: () => 'https://example.com/not-soundcloud' },
+  });
+  try {
+    await assert.rejects(
+      () => resolveRequest('https://snd.sc/AbCd12', 'Nizar', 1, manager),
+      (error) => error instanceof UserError && /did not stay on SoundCloud/.test(error.message),
+    );
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
+test('soundcloud falls back to the official api when lavalink cannot load the link', async () => {
+  const lavalink = {
+    name: 'lavalink',
+    label: 'SoundCloud',
+    canPlay: true,
+    enabled: () => true,
+    async resolveUrl() {
+      const error = new Error('That link could not be played.');
+      error.userError = true;
+      throw error;
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const soundcloud = {
+    name: 'soundcloud',
+    label: 'SoundCloud',
+    canPlay: true,
+    enabled: () => true,
+    async resolveUrl(input, requester) {
+      return {
+        tracks: [createTrack({ title: 'From API', artist: 'Artist', source: 'soundcloud', requester, identifier: input })],
+        restricted: 0,
+        truncated: false,
+      };
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const manager = ProviderManager.fromList([lavalink, soundcloud], ['lavalink', 'soundcloud']);
+  const result = await resolveRequest('https://soundcloud.com/artist/track', 'Nizar', 1, manager);
+  assert.equal(result.tracks[0].title, 'From API');
+  assert.equal(result.tracks[0].source, 'soundcloud');
+});
+
 test('soundcloud only treats full allowed tracks as playable', () => {
   assert.equal(trackIsPlayable({ id: 1, title: 'Song', access: 'playable', streamable: true }), true);
   assert.equal(trackIsPlayable({ id: 1, title: 'Song', access: 'preview', streamable: true }), false);

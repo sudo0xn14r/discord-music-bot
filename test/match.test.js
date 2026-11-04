@@ -30,6 +30,10 @@ test('spotify targets keep the id from urls and uris', () => {
 });
 
 test('no-login links are classified and catalog links stay metadata', () => {
+  assert.equal(linkKind('https://soundcloud.com/artist/track'), 'soundcloud');
+  assert.equal(linkKind('https://m.soundcloud.com/artist/track'), 'soundcloud');
+  assert.equal(linkKind('https://on.soundcloud.com/AbCd12'), 'soundcloud');
+  assert.equal(linkKind('https://snd.sc/AbCd12'), 'soundcloud');
   assert.equal(linkKind('https://artist.bandcamp.com/track/song'), 'bandcamp');
   assert.equal(linkKind('https://www.twitch.tv/videos/123'), 'twitch');
   assert.equal(linkKind('https://vimeo.com/123'), 'vimeo');

@@ -4,6 +4,7 @@ const {
   linkKind,
   titlesMatch,
 } = require('../providers/match');
+const { canonicalSoundCloudUrl } = require('../providers/soundcloud-link');
 
 function playbackNames(providers) {
   const names = providers.playbackProviders().map((provider) => provider.label);
@@ -85,6 +86,49 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
   return { tracks, unmatched, notice: notes.join(' ') || null };
 }
 
+async function resolveSoundCloud(input, requester, limit, providers) {
+  let page;
+  try {
+    page = await canonicalSoundCloudUrl(input);
+  } catch (error) {
+    throw new UserError(error.userError ? error.message : 'That SoundCloud link could not be opened.');
+  }
+  const lavalink = providers.get('lavalink');
+  const official = providers.get('soundcloud');
+  if (lavalink?.enabled()) {
+    try {
+      return await resolveDirect(page, requester, limit, providers);
+    } catch (error) {
+      if (!official?.enabled()) {
+        if (error instanceof UserError && /could not be played|did not have playable/.test(error.message)) {
+          throw new UserError('That SoundCloud link could not be played.');
+        }
+        throw error;
+      }
+    }
+  }
+  if (!official?.enabled()) {
+    throw new UserError('SoundCloud playback is disabled. Leave lavalink in PROVIDER_ORDER.');
+  }
+  let result;
+  try {
+    result = await official.resolveUrl(page, requester, limit);
+  } catch (error) {
+    console.error(`[provider:soundcloud] ${error.message}`);
+    throw new UserError(official.friendly(error));
+  }
+  const notes = [];
+  if (result.truncated) notes.push(`Only the first ${limit} tracks were added.`);
+  if (result.restricted) {
+    notes.push(`${result.restricted} SoundCloud track${result.restricted === 1 ? '' : 's'} could not be streamed and ${result.restricted === 1 ? 'was' : 'were'} skipped.`);
+  }
+  return {
+    tracks: result.tracks.map((track) => attachRequester(track, requester)),
+    unmatched: 0,
+    notice: notes.join(' ') || null,
+  };
+}
+
 async function resolveDirect(input, requester, limit, providers, providerName = 'lavalink') {
   const source = providers.get(providerName);
   if (!source || !source.enabled()) {
@@ -119,7 +163,10 @@ async function resolveRequest(query, requester, limit, providers) {
   if (kind === 'youtube') {
     return resolveDirect(input, requester, limit, providers, 'youtube');
   }
-  if (kind === 'soundcloud' || kind === 'bandcamp' || kind === 'twitch' || kind === 'vimeo' || kind === 'http') {
+  if (kind === 'soundcloud') {
+    return resolveSoundCloud(input, requester, limit, providers);
+  }
+  if (kind === 'bandcamp' || kind === 'twitch' || kind === 'vimeo' || kind === 'http') {
     return resolveDirect(input, requester, limit, providers);
   }
   const local = providers.get('local');

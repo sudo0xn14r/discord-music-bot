@@ -51,7 +51,10 @@ function isSpotifyUrl(value) {
 function isSoundCloudUrl(value) {
   if (!isHttpUrl(value)) return false;
   const host = hostOf(value);
-  return host === 'soundcloud.com' || host === 'm.soundcloud.com' || host === 'on.soundcloud.com';
+  return host === 'soundcloud.com'
+    || host === 'm.soundcloud.com'
+    || host === 'on.soundcloud.com'
+    || host === 'snd.sc';
 }
 
 function isBandcampUrl(value) {
