@@ -1,18 +1,21 @@
 # Discord music bot
 
-Friends-only music bot. Lavalink plays the audio. The bot decides which links are allowed. YouTube is not a source. There is no yt-dlp step and no browser cookies.
+Friends-only music bot. Lavalink plays the audio. The bot decides which links are allowed. There is no yt-dlp step and no browser cookies.
 
-Lavalink is the player. SoundCloud, Bandcamp, Twitch, Vimeo, public HTTP streams, and the local `music` folder are the sources that play without a login. Spotify, Apple Music, and Deezer links are read as metadata, then matched to the local library or SoundCloud. A weak match is refused instead of swapping in a different song. Without YouTube, that match is sometimes missed.
+Lavalink is the player. YouTube, SoundCloud, Bandcamp, Twitch, Vimeo, public HTTP streams, and the local `music` folder can play. Spotify, Apple Music, and Deezer links are read as metadata, then matched to YouTube, the local library, or SoundCloud. A close title match wins. If nothing is close, the bot plays the top YouTube result instead of refusing.
 
 ## What can play
 
-- **Local files** in the `music` folder. This is the dependable source. Name files `Artist - Title.mp3` (also flac, ogg, opus, wav, m4a, aac).
+- **YouTube** links and `ytsearch` through Lavalink's youtube-source plugin. The old built-in YouTube source stays off.
+- **Local files** in the `music` folder. This is the source that does not depend on an outside account. Name files `Artist - Title.mp3` (also flac, ogg, opus, wav, m4a, aac).
 - **SoundCloud, Bandcamp, Twitch, and Vimeo** links through Lavalink. None of these ask for a cookie or a user login.
 - **Public HTTP and HTTPS streams.** Private hosts, localhost, and link-local addresses are refused.
 - **SoundCloud search** when `soundcloud` or `lavalink` is in `PROVIDER_ORDER`. The official API still needs a SoundCloud developer app. Lavalink's own SoundCloud search does not.
-- **Spotify, Apple Music, and Deezer links** for title, artist, album, and duration. Spotify uses a developer app when `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are set. Apple Music uses the public iTunes lookup. Deezer uses the public Deezer API. None of those three are streamed. The LavaSrc plugin can also turn a Spotify link into a SoundCloud search. Its Apple Music and Deezer audio sources stay off, because those need extra account secrets.
+- **Spotify, Apple Music, and Deezer links** for title, artist, album, and duration. Spotify uses a developer app when `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are set. Apple Music uses the public iTunes lookup. Deezer uses the public Deezer API. None of those three are streamed. The LavaSrc plugin turns a Spotify link Lavalink loads itself into a YouTube search, then SoundCloud. Its Apple Music, Deezer, and YouTube audio sources stay off.
 
-A YouTube link gets: `YouTube isn't supported here, try a SoundCloud link or /play a song name`. Google treats datacenter addresses as suspicious, so account cookies are only a temporary patch and can get an account limited. YouTube stays unsupported on purpose.
+YouTube playback goes against YouTube's terms of service. For a private server that is usually tolerated, and it is your risk. YouTube also breaks often. If Lavalink logs "sign in to confirm you're not a bot", set a poToken or a YouTube OAuth refresh token on a burner account in `lavalink/application.yml`. The plugin needs regular updates. `dev.lavalink.youtube:youtube-plugin:1.18.2` is the version this config downloads.
+
+How the process, providers, queue, and database fit together is in [docs/DEVELOPER.md](docs/DEVELOPER.md).
 
 ## Requirements
 
@@ -42,13 +45,13 @@ Optional:
 | `SOUNDCLOUD_CLIENT_SECRET` | SoundCloud app secret, used to refresh the API token |
 | `SPOTIFY_CLIENT_ID` | Spotify app client id. Also read by Lavalink when the unit loads `.env`. |
 | `SPOTIFY_CLIENT_SECRET` | Spotify app secret |
-| `PROVIDER_ORDER` | Playback order. Default `local,soundcloud,lavalink`. |
+| `PROVIDER_ORDER` | Playback order. Default `youtube,local,soundcloud,lavalink`. |
 | `LOCAL_MUSIC_DIR` | Folder of audio files. Default `music`. |
 | `DATABASE_PATH` | SQLite file. Default `data/bot.sqlite`. |
 | `IDLE_MINUTES` | Leave after this many minutes in an empty channel or with an empty queue. Default 10. `0` disables it. |
 | `UPTIME_URL` | Optional address that receives a GET every 30 seconds. |
 
-Leave a provider's variables empty to disable that provider. `PROVIDER_ORDER=local` keeps file playback and skips SoundCloud search. Spotify metadata turns on only when both Spotify variables are set. Apple Music and Deezer metadata need no keys.
+Leave a provider's variables empty to disable that provider. `PROVIDER_ORDER=local` keeps file playback and skips YouTube and SoundCloud search. If `.env` already sets `PROVIDER_ORDER`, add `youtube` at the front. An existing value is not rewritten. Spotify metadata turns on only when both Spotify variables are set. Apple Music and Deezer metadata need no keys. YouTube search does not need a key. OAuth and a poToken are only for when YouTube starts refusing anonymous playback.
 
 No tokens belong in source files. Keep `.env` readable only by the account that runs the bot.
 
@@ -197,6 +200,6 @@ Without `DISCORD_TOKEN`, the process exits and tells you to set it. `npm test` d
 
 - One Lavalink node on localhost. Each Discord server has its own queue and player.
 - Playlists are capped at 50 tracks. Saved playlists store the file path or the source address, not an expiring stream URL.
-- Spotify, Apple Music, and Deezer audio are never requested. If the local library and SoundCloud have no matching title, the bot says so.
+- Spotify, Apple Music, and Deezer audio are never requested. A close match in YouTube, the local library, or SoundCloud plays. If there is no close match and YouTube is enabled, the top YouTube result plays.
 - This bot is for a private server. Playing a library into other people's servers can raise licensing questions.
 - Local files are the source that does not depend on an external account.

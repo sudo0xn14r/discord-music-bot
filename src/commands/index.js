@@ -1,8 +1,8 @@
 const { InteractionContextType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { UserError } = require('../errors');
 const { formatTrackLength, oneLine } = require('../format');
-const { createTrack } = require('../music/track');
 const { MAX_QUEUE } = require('../music/queue');
+const { tracksFromPlaylist } = require('../music/playlist');
 const { resolveRequest } = require('../music/resolver');
 const { playerMessage, queueMessage } = require('../panel');
 
@@ -18,7 +18,7 @@ const queryOption = (description) => (option) => option
 
 const play = guildOnly(new SlashCommandBuilder())
   .setName('play')
-  .setDescription('Play a song name or a SoundCloud, Bandcamp, Spotify, Apple, or Deezer link')
+  .setDescription('Play a song name or a YouTube, SoundCloud, Bandcamp, Spotify, Apple, or Deezer link')
   .addStringOption(queryOption('Song name or a supported link'));
 
 const playnow = guildOnly(new SlashCommandBuilder())
@@ -208,7 +208,15 @@ function matchNote(track) {
   const labels = { spotify: 'Spotify', apple: 'Apple Music', deezer: 'Deezer' };
   const from = labels[track?.matchedFrom];
   if (!from) return '';
-  const where = track.source === 'local' ? 'the local library' : 'SoundCloud';
+  const where = {
+    local: 'the local library',
+    youtube: 'YouTube',
+    soundcloud: 'SoundCloud',
+    lavalink: 'SoundCloud',
+  }[track.source] || 'a playback source';
+  if (track.loose) {
+    return `No close match, so this is the top ${where} result. ${from} audio is not streamed.`;
+  }
   return `Matched the ${from} metadata to ${where}. ${from} audio is not streamed.`;
 }
 
@@ -488,37 +496,7 @@ async function executePlaylist(interaction, music) {
     throw new UserError('You need to be in the same voice channel as me.');
   }
   const requester = requestedBy(interaction.user);
-  const tracks = [];
-  let missing = 0;
-  for (const row of saved.tracks) {
-    if (row.source === 'lavalink') {
-      if (!row.identifier && !row.pageUrl) {
-        missing += 1;
-        continue;
-      }
-      tracks.push(createTrack({
-        ...row,
-        requester,
-        identifier: row.identifier || row.pageUrl,
-      }));
-      continue;
-    }
-    if (row.source !== 'local' && row.source !== 'soundcloud') {
-      missing += 1;
-      continue;
-    }
-    const provider = music.providers.get(row.source);
-    if (!provider?.enabled()) {
-      missing += 1;
-      continue;
-    }
-    const track = createTrack({ ...row, requester });
-    if (track.source === 'local' && !provider.owns(track.filePath || '')) {
-      missing += 1;
-      continue;
-    }
-    tracks.push(track);
-  }
+  const { tracks, missing } = tracksFromPlaylist(saved.tracks, music.providers, requester);
   if (!tracks.length) {
     throw new UserError('None of the saved tracks are available from an enabled source anymore.');
   }

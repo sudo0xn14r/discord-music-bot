@@ -1,6 +1,5 @@
 const { UserError } = require('../errors');
 const {
-  YOUTUBE_MESSAGE,
   durationCompatible,
   linkKind,
   titlesMatch,
@@ -47,15 +46,25 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
   const selected = metadata.tracks.slice(0, limit);
   const tracks = [];
   let unmatched = 0;
+  let looseCount = 0;
   for (const item of selected) {
     const match = await providers.findMatch(item);
-    if (!match || !titlesMatch(item, match) || !durationCompatible(item.durationMs, match.durationMs)) {
+    const strict = match && titlesMatch(item, match) && durationCompatible(item.durationMs, match.durationMs);
+    let chosen = strict ? match : null;
+    if (!chosen) {
       if (match) console.error(`[resolver] rejected a weak match for "${item.title}"`);
+      chosen = await providers.looseMatch(item);
+    }
+    if (!chosen) {
       unmatched += 1;
       continue;
     }
-    const track = attachRequester(match, requester, providerName);
-    if (match.pageUrl == null && item.pageUrl) track.pageUrl = item.pageUrl;
+    const track = attachRequester(chosen, requester, providerName);
+    if (!strict) {
+      track.loose = true;
+      looseCount += 1;
+    }
+    if (chosen.pageUrl == null && item.pageUrl) track.pageUrl = item.pageUrl;
     tracks.push(track);
   }
   if (!tracks.length) {
@@ -63,6 +72,9 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
     throw new UserError(`I couldn't find a match for that ${provider.label} link in ${names}. Nothing else was substituted.`);
   }
   const notes = [];
+  if (looseCount) {
+    notes.push(`${looseCount} track${looseCount === 1 ? '' : 's'} used the top search result because there was no close match.`);
+  }
   if (unmatched) {
     notes.push(`${unmatched} ${provider.label} track${unmatched === 1 ? '' : 's'} had no match and ${unmatched === 1 ? 'was' : 'were'} skipped.`);
   }
@@ -72,16 +84,19 @@ async function resolveCatalog(input, requester, limit, providers, providerName) 
   return { tracks, unmatched, notice: notes.join(' ') || null };
 }
 
-async function resolveDirect(input, requester, limit, providers) {
-  const source = providers.get('lavalink');
+async function resolveDirect(input, requester, limit, providers, providerName = 'lavalink') {
+  const source = providers.get(providerName);
   if (!source || !source.enabled()) {
-    throw new UserError('Direct playback is disabled. Add lavalink to PROVIDER_ORDER.');
+    const message = providerName === 'youtube'
+      ? 'YouTube is disabled. Add youtube to PROVIDER_ORDER.'
+      : 'Direct playback is disabled. Add lavalink to PROVIDER_ORDER.';
+    throw new UserError(message);
   }
   let result;
   try {
     result = await source.resolveUrl(input, requester, limit);
   } catch (error) {
-    console.error(`[provider:lavalink] ${error.message}`);
+    console.error(`[provider:${providerName}] ${error.message}`);
     throw new UserError(source.friendly(error));
   }
   const notes = [];
@@ -97,9 +112,11 @@ async function resolveRequest(query, requester, limit, providers) {
   const input = String(query || '').trim();
   if (!input) throw new UserError('Tell me a song name or a supported link.');
   const kind = linkKind(input);
-  if (kind === 'youtube') throw new UserError(YOUTUBE_MESSAGE);
   if (kind === 'spotify' || kind === 'apple' || kind === 'deezer') {
     return resolveCatalog(input, requester, limit, providers, kind);
+  }
+  if (kind === 'youtube') {
+    return resolveDirect(input, requester, limit, providers, 'youtube');
   }
   if (kind === 'soundcloud' || kind === 'bandcamp' || kind === 'twitch' || kind === 'vimeo' || kind === 'http') {
     return resolveDirect(input, requester, limit, providers);
@@ -117,9 +134,19 @@ async function resolveRequest(query, requester, limit, providers) {
     if (!result.tracks.length) throw new UserError('That file is not in the local music library.');
     return { tracks: result.tracks, unmatched: 0, notice: null };
   }
-  const tracks = (await providers.search(input, 1)).map((track) => attachRequester(track, requester));
+  let tracks = (await providers.search(input, 1)).map((track) => attachRequester(track, requester));
+  if (tracks.length) return { tracks, unmatched: 0, notice: null };
+  tracks = (await providers.searchLoose(input, 1)).map((track) => {
+    const loose = attachRequester(track, requester);
+    loose.loose = true;
+    return loose;
+  });
   if (!tracks.length) throw new UserError(notFoundMessage(providers));
-  return { tracks, unmatched: 0, notice: null };
+  return {
+    tracks,
+    unmatched: 0,
+    notice: 'Played the top result. It may not be an exact match.',
+  };
 }
 
 module.exports = { resolveRequest, notFoundMessage };

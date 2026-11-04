@@ -1,5 +1,3 @@
-const YOUTUBE_MESSAGE = "YouTube isn't supported here, try a SoundCloud link or /play a song name";
-
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
   'youtu.be',
@@ -169,7 +167,6 @@ function spotifyTarget(input) {
 
 module.exports = {
   isHttpUrl,
-  YOUTUBE_MESSAGE,
   isYouTubeUrl,
   isSpotifyUrl,
   isSoundCloudUrl,

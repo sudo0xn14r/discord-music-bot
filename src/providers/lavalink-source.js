@@ -11,13 +11,13 @@ function canonicalIdentifier(value) {
   return url.toString();
 }
 
-function fromLavalinkTrack(track, requester) {
+function fromLavalinkTrack(track, requester, source = 'lavalink') {
   const info = track?.info || {};
   return createTrack({
     title: info.title,
     artist: info.author,
     durationMs: Number.isFinite(info.length) ? info.length : null,
-    source: 'lavalink',
+    source,
     requester,
     pageUrl: info.uri || null,
     identifier: info.uri || null,
@@ -28,9 +28,15 @@ class LavalinkSource {
   constructor(getNode, enabled) {
     this.name = 'lavalink';
     this.label = 'SoundCloud';
+    this.sourceName = 'lavalink';
     this.canPlay = true;
+    this.allowsLooseMatch = false;
     this.getNode = getNode;
     this.isEnabled = enabled !== false;
+  }
+
+  searchPrefix() {
+    return 'scsearch:';
   }
 
   enabled() {
@@ -60,40 +66,39 @@ class LavalinkSource {
     try {
       return await this.node().rest.resolve(identifier);
     } catch (error) {
-      log('error', 'Lavalink resolve failed', { source: 'lavalink', error: error.message });
+      log('error', 'Lavalink resolve failed', { source: this.name, error: error.message });
       throw error;
     }
   }
 
-  async search(query, limit = 1) {
+  async collectSearch(query) {
     let response;
     try {
-      response = await this.load(`scsearch:${query}`);
+      response = await this.load(`${this.searchPrefix()}${query}`);
     } catch (error) {
       if (error.userError) return [];
       throw error;
     }
     if (!response || response.loadType !== 'search' || !Array.isArray(response.data)) return [];
     return response.data
-      .map((track) => fromLavalinkTrack(track))
-      .filter((track) => track.identifier && queryMatches(query, track))
-      .slice(0, limit);
+      .map((track) => fromLavalinkTrack(track, undefined, this.sourceName))
+      .filter((track) => track.identifier);
+  }
+
+  async search(query, limit = 1) {
+    const tracks = await this.collectSearch(query);
+    return tracks.filter((track) => queryMatches(query, track)).slice(0, limit);
+  }
+
+  async topResults(query, limit = 1) {
+    const tracks = await this.collectSearch(query);
+    return tracks.slice(0, limit);
   }
 
   async findMatch(metadata) {
     const query = [metadata.artist, metadata.title].filter(Boolean).join(' ').trim();
     if (!query) return null;
-    let response;
-    try {
-      response = await this.load(`scsearch:${query}`);
-    } catch (error) {
-      if (error.userError) return null;
-      throw error;
-    }
-    if (!response || response.loadType !== 'search' || !Array.isArray(response.data)) return null;
-    const candidates = response.data
-      .map((track) => fromLavalinkTrack(track))
-      .filter((track) => track.identifier);
+    const candidates = await this.collectSearch(query);
     return pickBestMatch(metadata, candidates);
   }
 
@@ -107,7 +112,7 @@ class LavalinkSource {
     }
     if (response.loadType === 'error') {
       log('error', 'Lavalink could not load a link', {
-        source: 'lavalink',
+        source: this.name,
         error: response.data?.message || 'unknown',
       });
       const error = new Error('That link could not be played.');
@@ -115,7 +120,7 @@ class LavalinkSource {
       throw error;
     }
     if (response.loadType === 'track') {
-      const track = fromLavalinkTrack(response.data, requester);
+      const track = fromLavalinkTrack(response.data, requester, this.sourceName);
       if (!track.identifier) track.identifier = identifier;
       return { tracks: [track], restricted: 0, truncated: false };
     }
@@ -124,7 +129,7 @@ class LavalinkSource {
       : response.loadType === 'search'
         ? response.data || []
         : [];
-    const tracks = list.map((item) => fromLavalinkTrack(item, requester)).filter((track) => track.identifier);
+    const tracks = list.map((item) => fromLavalinkTrack(item, requester, this.sourceName)).filter((track) => track.identifier);
     const selected = tracks.slice(0, limit);
     if (!selected.length) {
       const error = new Error('That link did not have playable audio.');

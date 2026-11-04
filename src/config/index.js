@@ -53,7 +53,7 @@ function loadConfig() {
     console.error('OWNER_ID must be a Discord user id, or left empty.');
     process.exit(1);
   }
-  const providerOrder = (readEnv('PROVIDER_ORDER') || 'local,soundcloud,lavalink')
+  const providerOrder = (readEnv('PROVIDER_ORDER') || 'youtube,local,soundcloud,lavalink')
     .split(',')
     .map((name) => name.trim().toLowerCase())
     .filter(Boolean);

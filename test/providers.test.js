@@ -5,8 +5,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { LocalLibrary } = require('../src/providers/local-library');
 const { ProviderManager } = require('../src/providers/provider-manager');
+const { tracksFromPlaylist } = require('../src/music/playlist');
 const { resolveRequest } = require('../src/music/resolver');
 const { createTrack } = require('../src/music/track');
+const { YoutubeProvider } = require('../src/providers/youtube');
 const { UserError } = require('../src/errors');
 const { trackIsPlayable } = require('../src/providers/soundcloud');
 const { openDatabase } = require('../src/db');
@@ -111,28 +113,177 @@ test('text search rejects an unrelated provider result', async () => {
   );
 });
 
-test('youtube links are refused before any provider is asked', async () => {
-  let called = false;
+test('youtube links resolve through the youtube provider and do not search', async () => {
+  let searched = false;
+  let resolved = null;
   const manager = ProviderManager.fromList([
+    {
+      name: 'youtube',
+      label: 'YouTube',
+      canPlay: true,
+      enabled: () => true,
+      available: async () => true,
+      status: () => 'enabled',
+      async search() {
+        searched = true;
+        return [];
+      },
+      async resolveUrl(input, requester) {
+        resolved = input;
+        return {
+          tracks: [createTrack({
+            title: 'Video',
+            artist: 'Artist',
+            source: 'youtube',
+            identifier: input,
+            requester,
+          })],
+          truncated: false,
+        };
+      },
+      friendly(error) {
+        return error.message;
+      },
+    },
     {
       name: 'local',
       label: 'the local library',
       canPlay: true,
       enabled: () => true,
       available: async () => true,
-      status: () => 'enabled',
       looksLikePath: () => false,
       async search() {
-        called = true;
+        searched = true;
         return [];
       },
     },
+  ], ['youtube', 'local']);
+  const result = await resolveRequest('https://youtu.be/dQw4w9WgXcQ', 'Nizar', 1, manager);
+  assert.equal(searched, false);
+  assert.equal(resolved, 'https://youtu.be/dQw4w9WgXcQ');
+  assert.equal(result.tracks[0].source, 'youtube');
+  assert.equal(result.tracks[0].identifier, 'https://youtu.be/dQw4w9WgXcQ');
+});
+
+test('a disabled youtube provider refuses a youtube link', async () => {
+  const manager = ProviderManager.fromList([
+    {
+      name: 'youtube',
+      label: 'YouTube',
+      canPlay: true,
+      enabled: () => false,
+      available: async () => false,
+    },
   ], ['local']);
   await assert.rejects(
-    () => resolveRequest('https://youtu.be/dQw4w9WgXcQ', 'Nizar', 1, manager),
-    (error) => error instanceof UserError && error.message === "YouTube isn't supported here, try a SoundCloud link or /play a song name",
+    () => resolveRequest('https://www.youtube.com/watch?v=abc', 'Nizar', 1, manager),
+    (error) => error instanceof UserError && /Add youtube to PROVIDER_ORDER/.test(error.message),
   );
-  assert.equal(called, false);
+});
+
+function youtubeNode(hits) {
+  const identifiers = [];
+  const youtube = new YoutubeProvider(() => ({
+    name: 'main',
+    rest: {
+      async resolve(identifier) {
+        identifiers.push(identifier);
+        if (String(identifier).startsWith('ytsearch:')) {
+          return { loadType: 'search', data: hits };
+        }
+        return {
+          loadType: 'track',
+          data: hits[0] || { info: { title: 'Video', author: 'Artist', uri: identifier, length: 1000 } },
+        };
+      },
+    },
+  }), true);
+  return { youtube, identifiers };
+}
+
+test('youtube search uses ytsearch and falls back to the top result', async () => {
+  const { youtube, identifiers } = youtubeNode([
+    { info: { title: 'Unrelated Mix', author: 'Other', length: 1000, uri: 'https://www.youtube.com/watch?v=aaa' } },
+  ]);
+  const manager = ProviderManager.fromList([youtube], ['youtube']);
+  const result = await resolveRequest('not like us', 'Nizar', 1, manager);
+  assert.equal(identifiers[0], 'ytsearch:not like us');
+  assert.equal(result.tracks[0].source, 'youtube');
+  assert.equal(result.tracks[0].title, 'Unrelated Mix');
+  assert.equal(result.tracks[0].loose, true);
+  assert.match(result.notice, /top result/);
+});
+
+test('a close youtube match is kept and a later loose hit is not used', async () => {
+  const { youtube, identifiers } = youtubeNode([
+    { info: { title: 'Not Like Us', author: 'Kendrick Lamar', length: 240000, uri: 'https://www.youtube.com/watch?v=bbb' } },
+    { info: { title: 'Unrelated Mix', author: 'Other', length: 1000, uri: 'https://www.youtube.com/watch?v=aaa' } },
+  ]);
+  const manager = ProviderManager.fromList([youtube], ['youtube']);
+  const result = await resolveRequest('Kendrick Lamar - Not Like Us', 'Nizar', 1, manager);
+  assert.equal(identifiers.length, 1);
+  assert.equal(result.tracks[0].title, 'Not Like Us');
+  assert.equal(result.tracks[0].loose, undefined);
+  assert.equal(result.notice, null);
+});
+
+test('spotify metadata falls back to the top youtube result when nothing is close', async () => {
+  const { youtube } = youtubeNode([
+    { info: { title: 'Some Other Song', author: 'Someone', length: 200000, uri: 'https://www.youtube.com/watch?v=ccc' } },
+  ]);
+  const spotify = {
+    name: 'spotify',
+    label: 'Spotify',
+    canPlay: false,
+    enabled: () => true,
+    status: () => 'enabled for metadata',
+    async resolveMetadata() {
+      return { kind: 'tracks', tracks: [{ title: 'tv off', artist: 'Kendrick Lamar', durationMs: 180000 }] };
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const manager = ProviderManager.fromList([spotify, youtube], ['youtube']);
+  const result = await resolveRequest('https://open.spotify.com/track/missing', 'Nizar', 5, manager);
+  assert.equal(result.tracks[0].source, 'youtube');
+  assert.equal(result.tracks[0].title, 'Some Other Song');
+  assert.equal(result.tracks[0].matchedFrom, 'spotify');
+  assert.equal(result.tracks[0].loose, true);
+  assert.match(result.notice, /top search result/);
+});
+
+test('a strict local match still beats an unrelated youtube hit', async () => {
+  const library = libraryWith({ 'Kendrick Lamar - Not Like Us.mp3': 'audio' });
+  const { youtube } = youtubeNode([
+    { info: { title: 'Unrelated Mix', author: 'Other', length: 1000, uri: 'https://www.youtube.com/watch?v=aaa' } },
+  ]);
+  const manager = ProviderManager.fromList([youtube, library], ['youtube', 'local']);
+  const result = await resolveRequest('Kendrick Lamar - Not Like Us', 'Nizar', 1, manager);
+  assert.equal(result.tracks[0].source, 'local');
+  assert.equal(result.notice, null);
+});
+
+test('saved youtube tracks load when the provider is enabled', () => {
+  const providers = {
+    get(name) {
+      if (name !== 'youtube') return null;
+      return { enabled: () => true };
+    },
+  };
+  const loaded = tracksFromPlaylist([
+    { title: 'Video', artist: 'Artist', source: 'youtube', identifier: 'https://www.youtube.com/watch?v=abc' },
+    { title: 'Gone', artist: 'Artist', source: 'youtube' },
+  ], providers, 'Nizar');
+  assert.equal(loaded.tracks.length, 1);
+  assert.equal(loaded.tracks[0].source, 'youtube');
+  assert.equal(loaded.tracks[0].identifier, 'https://www.youtube.com/watch?v=abc');
+  assert.equal(loaded.missing, 1);
+  const disabled = tracksFromPlaylist([
+    { title: 'Video', artist: 'Artist', source: 'youtube', identifier: 'https://www.youtube.com/watch?v=abc' },
+  ], { get: () => ({ enabled: () => false }) }, 'Nizar');
+  assert.equal(disabled.tracks.length, 0);
+  assert.equal(disabled.missing, 1);
 });
 
 test('spotify metadata is not replaced with an unrelated track', async () => {

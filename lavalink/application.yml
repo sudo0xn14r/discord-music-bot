@@ -13,6 +13,11 @@ server: # REST and WS server
 
 lavalink:
   plugins:
+    # youtube-source replaces Lavalink's deprecated built-in YouTube source.
+    # Keep sources.youtube false below or the two sources fight over the same links.
+    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
+      repository: "https://maven.lavalink.dev/releases"
+      snapshot: false
     - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
       repository: "https://maven.lavalink.dev/releases"
     - dependency: "com.github.Lochis.soundy:plugin:1.1.0"
@@ -20,6 +25,7 @@ lavalink:
   server:
     password: "changeme"
     sources:
+      # Built-in YouTube source is deprecated. The youtube plugin above plays YouTube.
       youtube: false
       bandcamp: true
       # Lavalink's built-in SoundCloud source cannot read current SoundCloud streams.
@@ -47,8 +53,10 @@ lavalink:
     resamplingQuality: MEDIUM
     trackStuckThresholdMs: 10000
     useSeekGhosting: true
-    youtubePlaylistLoadLimit: 6
+    # The plugin still reads this limit. 50 matches the bot queue cap.
+    youtubePlaylistLoadLimit: 50
     playerUpdateInterval: 5
+    # Built-in YouTube search stays off. The plugin's allowSearch enables ytsearch: instead.
     youtubeSearchEnabled: false
     soundcloudSearchEnabled: true
     soundcloudFilterOutPreviewTracks: true
@@ -59,10 +67,30 @@ lavalink:
       socketTimeoutMs: 15000
 
 plugins:
+  youtube:
+    enabled: true
+    allowSearch: true
+    allowDirectVideoIds: true
+    allowDirectPlaylistIds: true
+    clients:
+      - MUSIC
+      - ANDROID_VR
+      - WEB
+      - WEBEMBEDDED
+    # OAuth and a poToken are optional. Leave OAuth off unless playback starts
+    # failing with a "sign in to confirm you're not a bot" error. Use a burner
+    # account if you turn OAuth on. Uncomment one of these, not both.
+    oauth:
+      enabled: false
+      # refreshToken: "${YOUTUBE_REFRESH_TOKEN:}"
+    # pot:
+    #   token: "${YOUTUBE_POTOKEN:}"
+    #   visitorData: "${YOUTUBE_VISITOR_DATA:}"
   soundy:
     enabled: true
   lavasrc:
     providers:
+      - "ytsearch:%QUERY%"
       - "scsearch:%QUERY%"
     sources:
       spotify: true

@@ -5,22 +5,24 @@ const { LavalinkSource } = require('./lavalink-source');
 const { LocalLibrary } = require('./local-library');
 const { SoundCloudProvider } = require('./soundcloud');
 const { SpotifyProvider } = require('./spotify');
+const { YoutubeProvider } = require('./youtube');
 
-const PLAYBACK_PROVIDERS = new Set(['local', 'soundcloud', 'lavalink']);
+const PLAYBACK_PROVIDERS = new Set(['youtube', 'local', 'soundcloud', 'lavalink']);
 
 class ProviderManager {
   constructor(config, getNode = () => null) {
     this.order = config.providerOrder.filter((name) => !['spotify', 'apple', 'deezer'].includes(name));
     for (const name of config.providerOrder) {
       if (name === 'spotify' || name === 'apple' || name === 'deezer') {
-        console.warn(`${name} is metadata only. Playback comes from the local library or SoundCloud.`);
+        console.warn(`${name} is metadata only. Playback comes from YouTube, the local library, or SoundCloud.`);
         continue;
       }
       if (!PLAYBACK_PROVIDERS.has(name)) {
-        console.warn(`Unknown provider "${name}" in PROVIDER_ORDER. Expected local, soundcloud, or lavalink.`);
+        console.warn(`Unknown provider "${name}" in PROVIDER_ORDER. Expected youtube, local, soundcloud, or lavalink.`);
       }
     }
     this.providers = new Map();
+    this.register(new YoutubeProvider(getNode, this.order.includes('youtube')));
     this.register(new LocalLibrary({
       localMusicDir: config.localMusicDir,
       enabled: this.order.includes('local'),
@@ -92,6 +94,27 @@ class ProviderManager {
       }
     }
     return null;
+  }
+
+  async searchLoose(query, limit) {
+    for (const provider of this.playbackProviders()) {
+      if (!provider.allowsLooseMatch || typeof provider.topResults !== 'function') continue;
+      try {
+        if (!(await provider.available())) continue;
+        const found = await provider.topResults(query, limit);
+        if (found?.length) return found.slice(0, limit);
+      } catch (error) {
+        console.error(`[provider:${provider.name}] loose search failed: ${error.message}`);
+      }
+    }
+    return [];
+  }
+
+  async looseMatch(metadata) {
+    const query = [metadata.artist, metadata.title].filter(Boolean).join(' ').trim();
+    if (!query) return null;
+    const found = await this.searchLoose(query, 1);
+    return found[0] || null;
   }
 
   async playbackIdentifier(track) {
