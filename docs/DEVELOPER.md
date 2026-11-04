@@ -71,7 +71,7 @@ Lavalink on 127.0.0.1:2333
             via the soundy plugin and Lavalink's HTTP source
 ```
 
-Lavalink does not choose policy. The bot decides what identifier to hand it. Lavalink's built-in YouTube and SoundCloud sources are off in `application.yml`. YouTube is played by `dev.lavalink.youtube:youtube-plugin:1.18.2` (`ytsearch:` and YouTube URLs). SoundCloud search and SoundCloud links are played by the soundy plugin (`scsearch` and SoundCloud URLs, no account). Bandcamp, Twitch, Vimeo, HTTP, and local stay on as Lavalink built-ins.
+Lavalink does not choose policy. The bot decides what identifier to hand it. Lavalink's built-in YouTube and SoundCloud sources are off in `application.yml`. YouTube is played by youtube-source snapshot `2be8e542d3f6f178e048dca565892684c2e40177` (`ytsearch:` and YouTube URLs). Release 1.18.2 is rejected with "The page needs to be reloaded." SoundCloud search and SoundCloud links are played by the soundy plugin (`scsearch` and SoundCloud URLs, no account). Bandcamp, Twitch, Vimeo, HTTP, and local stay on as Lavalink built-ins.
 
 The plugin config enables search, direct video ids, and direct playlist ids. Clients are tried in order: `MUSIC`, `ANDROID_VR`, `WEB`, `WEBEMBEDDED`. `MUSIC` does not play audio. It covers YouTube Music search. The others can play. `youtubePlaylistLoadLimit` is 50, which the plugin still reads, so a pasted playlist can fill the queue. `youtubeSearchEnabled` stays false because that flag belongs to the built-in source.
 

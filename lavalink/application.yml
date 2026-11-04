@@ -15,8 +15,11 @@ lavalink:
   plugins:
     # youtube-source replaces Lavalink's deprecated built-in YouTube source.
     # Keep sources.youtube false below or the two sources fight over the same links.
-    - dependency: "dev.lavalink.youtube:youtube-plugin:1.18.2"
-      repository: "https://maven.lavalink.dev/releases"
+    # 1.18.2 is the newest release, and YouTube now rejects its TV client with
+    # "The page needs to be reloaded." This snapshot is the current build, which
+    # uses the TV client YouTube still accepts when OAuth is enabled.
+    - dependency: "dev.lavalink.youtube:youtube-plugin:2be8e542d3f6f178e048dca565892684c2e40177"
+      repository: "https://maven.lavalink.dev/snapshots"
       snapshot: false
     - dependency: "com.github.topi314.lavasrc:lavasrc-plugin:4.8.3"
       repository: "https://maven.lavalink.dev/releases"

@@ -13,7 +13,7 @@ Lavalink is the player. YouTube, SoundCloud, Bandcamp, Twitch, Vimeo, public HTT
 - **SoundCloud search** when `soundcloud` or `lavalink` is in `PROVIDER_ORDER`. The official API still needs a SoundCloud developer app. Lavalink's own SoundCloud search does not.
 - **Spotify, Apple Music, and Deezer links** for title, artist, album, and duration. Spotify uses a developer app when `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` are set. Apple Music uses the public iTunes lookup. Deezer uses the public Deezer API. None of those three are streamed. The LavaSrc plugin turns a Spotify link Lavalink loads itself into a YouTube search, then SoundCloud. Its Apple Music, Deezer, and YouTube audio sources stay off.
 
-YouTube playback goes against YouTube's terms of service. For a private server that is usually tolerated, and it is your risk. YouTube also breaks often. If Lavalink logs "sign in to confirm you're not a bot", set a poToken or a YouTube OAuth refresh token on a burner account in `lavalink/application.yml`. The plugin needs regular updates. `dev.lavalink.youtube:youtube-plugin:1.18.2` is the version this config downloads.
+YouTube playback goes against YouTube's terms of service. For a private server that is usually tolerated, and it is your risk. YouTube also breaks often. If Lavalink logs "sign in to confirm you're not a bot", set a poToken or a YouTube OAuth refresh token on a burner account in `lavalink/application.yml`. The plugin needs regular updates. This config downloads the current youtube-source snapshot `2be8e542d3f6f178e048dca565892684c2e40177`, because release 1.18.2 is rejected with "The page needs to be reloaded."
 
 How the process, providers, queue, and database fit together is in [docs/DEVELOPER.md](docs/DEVELOPER.md).
 
