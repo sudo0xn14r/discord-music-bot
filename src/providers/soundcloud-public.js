@@ -105,6 +105,70 @@ async function resolvePublicSoundCloud(page, limit, fetchImpl = fetch) {
   throw userError('Paste a SoundCloud track, playlist, or artist link.');
 }
 
+function compactTitle(value) {
+  return String(value || '')
+    .replace(/\u0640/g, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .toLowerCase();
+}
+
+function plainTranscoding(resource) {
+  const usable = (resource?.media?.transcodings || []).filter((item) => (
+    item?.url
+    && item.snipped !== true
+    && item.format?.protocol === 'hls'
+    && String(item.format?.mime_type || '').startsWith('audio/mp4')
+  ));
+  return usable.find((item) => item.preset === 'aac_160k') || usable[0] || null;
+}
+
+function sameRecording(wanted, candidate) {
+  const wantedTitle = compactTitle(wanted.title);
+  const candidateTitle = compactTitle(candidate.title);
+  if (wantedTitle.length < 2 || candidateTitle.length < 2) return false;
+  if (!candidateTitle.includes(wantedTitle) && !wantedTitle.includes(candidateTitle)) return false;
+  const wantedMs = Number(wanted.duration);
+  const candidateMs = Number(candidate.duration);
+  if (!Number.isFinite(wantedMs) || !Number.isFinite(candidateMs) || wantedMs <= 0 || candidateMs <= 0) {
+    return true;
+  }
+  return Math.abs(candidateMs - wantedMs) <= Math.max(20000, wantedMs * 0.15);
+}
+
+async function mediaUrlFor(transcoding, clientId, fetchImpl) {
+  const separator = transcoding.url.includes('?') ? '&' : '?';
+  let media;
+  try {
+    media = JSON.parse(await readResponse(
+      fetchImpl,
+      `${transcoding.url}${separator}client_id=${clientId}`,
+      'application/json',
+    ));
+  } catch (error) {
+    if (error.status === 404) throw userError('SoundCloud does not make that track available.');
+    throw error;
+  }
+  if (!media?.url) throw userError('SoundCloud does not make that track available.');
+  return media.url;
+}
+
+async function playableCopy(resource, clientId, fetchImpl) {
+  const query = String(resource.title || '').trim();
+  if (!query) return null;
+  const body = await readResponse(
+    fetchImpl,
+    `${API}/search/tracks?q=${encodeURIComponent(query)}&limit=10&client_id=${clientId}`,
+    'application/json',
+  );
+  const matches = (JSON.parse(body).collection || [])
+    .filter((item) => item?.id !== resource.id && plainTranscoding(item) && sameRecording(resource, item));
+  matches.sort((left, right) => (
+    Math.abs(Number(left.duration) - Number(resource.duration))
+    - Math.abs(Number(right.duration) - Number(resource.duration))
+  ));
+  return matches[0] || null;
+}
+
 async function soundCloudMediaUrl(page, fetchImpl = fetch) {
   const clientId = await soundCloudClientId(fetchImpl);
   let resource;
@@ -119,29 +183,13 @@ async function soundCloudMediaUrl(page, fetchImpl = fetch) {
     throw error;
   }
   if (resource?.kind !== 'track') throw userError('That SoundCloud track could not be played.');
-  const list = resource.media?.transcodings || [];
-  const usable = list.filter((item) => (
-    item?.url
-    && item.snipped !== true
-    && item.format?.protocol === 'hls'
-    && String(item.format?.mime_type || '').startsWith('audio/mp4')
-  ));
-  const chosen = usable.find((item) => item.preset === 'aac_160k') || usable[0];
-  if (!chosen) throw userError('SoundCloud does not make that track available.');
-  const separator = chosen.url.includes('?') ? '&' : '?';
-  let media;
-  try {
-    media = JSON.parse(await readResponse(
-      fetchImpl,
-      `${chosen.url}${separator}client_id=${clientId}`,
-      'application/json',
-    ));
-  } catch (error) {
-    if (error.status === 404) throw userError('SoundCloud does not make that track available.');
-    throw error;
+  let chosen = plainTranscoding(resource);
+  if (!chosen) {
+    const copy = await playableCopy(resource, clientId, fetchImpl);
+    chosen = copy ? plainTranscoding(copy) : null;
   }
-  if (!media?.url) throw userError('SoundCloud does not make that track available.');
-  return media.url;
+  if (!chosen) throw userError('That SoundCloud upload is locked, and there is no other copy to play.');
+  return mediaUrlFor(chosen, clientId, fetchImpl);
 }
 
 module.exports = {
