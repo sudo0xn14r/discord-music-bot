@@ -103,7 +103,20 @@ class LavalinkSource {
     return pickBestMatch(metadata, candidates);
   }
 
+  async waitForNode() {
+    const started = Date.now();
+    while (Date.now() - started <= 20000) {
+      const node = this.getNode();
+      if (node) return node;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    const error = new Error('The audio server is still starting. Try again in a moment.');
+    error.userError = true;
+    throw error;
+  }
+
   async resolveUrl(input, requester, limit = 50) {
+    await this.waitForNode();
     const identifier = canonicalIdentifier(input);
     const response = await this.load(identifier);
     if (!response || response.loadType === 'empty') {

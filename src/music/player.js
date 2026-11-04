@@ -175,10 +175,15 @@ class GuildSession {
     this.panel = { channelId: message.channelId, messageId: message.id };
   }
 
-  node() {
-    const node = this.manager.lavalink.getIdealNode();
-    if (!node) throw new UserError('The audio server is not connected. Wait a moment and try again.');
-    return node;
+  async node() {
+    const started = Date.now();
+    while (Date.now() - started <= 20000) {
+      this.manager.lavalink.ensureConnected?.();
+      const node = this.manager.lavalink.getIdealNode();
+      if (node) return node;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+    throw new UserError('The audio server is still starting. Try again in a moment.');
   }
 
   async join(channelId, shardId) {
@@ -254,7 +259,8 @@ class GuildSession {
       }
       let response;
       try {
-        response = await this.node().rest.resolve(identifier);
+        const node = await this.node();
+        response = await node.rest.resolve(identifier);
       } catch (error) {
         log('error', 'playback failed', {
           guildId: this.guildId,
@@ -264,7 +270,10 @@ class GuildSession {
         });
         this.queue.current = null;
         this.queue.upcoming.unshift(track);
-        return { ok: false, reason: 'The audio server could not load that track.', skipped };
+        const reason = error instanceof UserError
+          ? error.message
+          : 'The audio server could not load that track.';
+        return { ok: false, reason, skipped };
       }
       if (!response || response.loadType !== 'track') {
         if (response?.loadType === 'error') {

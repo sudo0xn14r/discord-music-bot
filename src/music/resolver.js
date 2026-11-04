@@ -1,10 +1,12 @@
 const { UserError } = require('../errors');
+const { createTrack } = require('./track');
 const {
   durationCompatible,
   linkKind,
   titlesMatch,
 } = require('../providers/match');
 const { canonicalSoundCloudUrl } = require('../providers/soundcloud-link');
+const { resolvePublicSoundCloud } = require('../providers/soundcloud-public');
 
 function playbackNames(providers) {
   const names = providers.playbackProviders().map((provider) => provider.label);
@@ -95,20 +97,47 @@ async function resolveSoundCloud(input, requester, limit, providers) {
   }
   const lavalink = providers.get('lavalink');
   const official = providers.get('soundcloud');
-  if (lavalink?.enabled()) {
+  let lavalinkError = null;
+  const lavalinkReady = lavalink?.enabled()
+    && (typeof lavalink.available === 'function' ? await lavalink.available() : true);
+  if (lavalinkReady) {
     try {
       return await resolveDirect(page, requester, limit, providers);
     } catch (error) {
-      if (!official?.enabled()) {
-        if (error instanceof UserError && /could not be played|did not have playable/.test(error.message)) {
-          throw new UserError('That SoundCloud link could not be played.');
-        }
-        throw error;
-      }
+      lavalinkError = error;
+    }
+  }
+  try {
+    const resolved = await resolvePublicSoundCloud(page, limit);
+    return {
+      tracks: resolved.tracks.map((item) => attachRequester(createTrack({
+        title: item.title,
+        artist: item.artist,
+        durationMs: item.durationMs,
+        source: 'lavalink',
+        pageUrl: item.pageUrl,
+        identifier: item.pageUrl,
+      }), requester)),
+      unmatched: 0,
+      notice: resolved.notice,
+    };
+  } catch (error) {
+    if (!(error.userError || error instanceof UserError)) {
+      console.error(`[provider:soundcloud] ${error.message}`);
+    } else if (!official?.enabled()) {
+      throw error instanceof UserError ? error : new UserError(error.message);
     }
   }
   if (!official?.enabled()) {
-    throw new UserError('SoundCloud playback is disabled. Leave lavalink in PROVIDER_ORDER.');
+    if (lavalinkError instanceof UserError && /could not be played|did not have playable|not connected|still starting/.test(lavalinkError.message)) {
+      throw new UserError(/not connected|still starting/.test(lavalinkError.message)
+        ? 'The audio server is still starting. Try again in a moment.'
+        : 'That SoundCloud link could not be played.');
+    }
+    if (!lavalink?.enabled()) {
+      throw new UserError('SoundCloud playback is disabled. Leave lavalink in PROVIDER_ORDER.');
+    }
+    throw lavalinkError instanceof UserError ? lavalinkError : new UserError('That SoundCloud link could not be played.');
   }
   let result;
   try {

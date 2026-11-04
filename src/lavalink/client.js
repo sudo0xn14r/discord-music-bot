@@ -37,6 +37,16 @@ function createLavalink(client, config) {
   shoukaku.on('reconnecting', (name) => {
     console.warn(`[lavalink:${name}] reconnecting`);
   });
+  shoukaku.ensureConnected = () => {
+    const name = config.lavalink.name;
+    if (shoukaku.nodes.has(name)) return;
+    shoukaku.addNode({
+      name,
+      url: `${config.lavalink.host}:${config.lavalink.port}`,
+      auth: config.lavalink.password,
+      secure: config.lavalink.secure,
+    });
+  };
 
   return shoukaku;
 }

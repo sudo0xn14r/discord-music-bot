@@ -12,6 +12,7 @@ const { YoutubeProvider } = require('../src/providers/youtube');
 const { SpotifyProvider, parseSpotifyEmbed } = require('../src/providers/spotify');
 const { UserError } = require('../src/errors');
 const { trackIsPlayable } = require('../src/providers/soundcloud');
+const { resetSoundCloudClientId } = require('../src/providers/soundcloud-public');
 const { openDatabase } = require('../src/db');
 
 function libraryWith(files) {
@@ -407,10 +408,9 @@ test('a soundcloud link plays the track and a set plays each track', async () =>
     const secret = await resolveRequest('https://soundcloud.com/artist/private?secret_token=s-abc&si=1', 'Nizar', 1, manager);
     assert.equal(seen[2], 'https://soundcloud.com/artist/private?secret_token=s-abc');
     assert.equal(secret.tracks[0].title, 'Faded');
-    await assert.rejects(
-      () => resolveRequest('https://soundcloud.com/artist', 'Nizar', 1, manager),
-      (error) => error instanceof UserError && /track or playlist/.test(error.message),
-    );
+    const profile = await resolveRequest('https://soundcloud.com/artist', 'Nizar', 1, manager);
+    assert.equal(seen[3], 'https://soundcloud.com/artist');
+    assert.equal(profile.tracks[0].title, 'Faded');
   } finally {
     global.fetch = originalFetch;
   }
@@ -482,7 +482,83 @@ test('a soundcloud short link that leaves soundcloud is refused', async () => {
   }
 });
 
+test('a soundcloud link still plays when lavalink cannot load it', async () => {
+  resetSoundCloudClientId();
+  const lavalink = {
+    name: 'lavalink',
+    label: 'SoundCloud',
+    canPlay: true,
+    enabled: () => true,
+    available: async () => true,
+    async resolveUrl() {
+      const error = new Error('That link could not be played.');
+      error.userError = true;
+      throw error;
+    },
+    friendly(error) {
+      return error.message;
+    },
+  };
+  const manager = ProviderManager.fromList([lavalink], ['lavalink']);
+  const originalFetch = global.fetch;
+  global.fetch = async (url) => {
+    const target = String(url);
+    if (target === 'https://soundcloud.com/') {
+      return {
+        ok: true,
+        async text() {
+          return '<script src="https://a-v2.sndcdn.com/assets/app.js"></script>';
+        },
+      };
+    }
+    if (target.endsWith('/app.js')) {
+      return { ok: true, async text() { return '},{client_id:"abcdefghijklmnopqrstuvwxyz012345"}'; } };
+    }
+    if (target.includes('/resolve?')) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            kind: 'user',
+            id: 2152092,
+            username: 'TeamSESH',
+          });
+        },
+      };
+    }
+    if (target.includes('/users/2152092/tracks')) {
+      return {
+        ok: true,
+        async text() {
+          return JSON.stringify({
+            collection: [{
+              title: 'Bones - Sodium',
+              permalink_url: 'https://soundcloud.com/teamsesh/bones-sodium',
+              duration: 115438,
+              user: { username: 'TeamSESH' },
+            }],
+          });
+        },
+      };
+    }
+    return { ok: false, status: 404, async text() { return ''; } };
+  };
+  try {
+    const result = await resolveRequest('https://soundcloud.com/teamsesh', 'Nizar', 5, manager);
+    assert.equal(result.tracks[0].title, 'Bones - Sodium');
+    assert.equal(result.tracks[0].artist, 'TeamSESH');
+    assert.equal(result.tracks[0].identifier, 'https://soundcloud.com/teamsesh/bones-sodium');
+    assert.match(result.notice, /TeamSESH/);
+  } finally {
+    global.fetch = originalFetch;
+    resetSoundCloudClientId();
+  }
+});
+
 test('soundcloud falls back to the official api when lavalink cannot load the link', async () => {
+  resetSoundCloudClientId();
+  const originalFetch = global.fetch;
+  global.fetch = async () => ({ ok: false, status: 404, async text() { return ''; } });
   const lavalink = {
     name: 'lavalink',
     label: 'SoundCloud',
@@ -514,9 +590,14 @@ test('soundcloud falls back to the official api when lavalink cannot load the li
     },
   };
   const manager = ProviderManager.fromList([lavalink, soundcloud], ['lavalink', 'soundcloud']);
-  const result = await resolveRequest('https://soundcloud.com/artist/track', 'Nizar', 1, manager);
-  assert.equal(result.tracks[0].title, 'From API');
-  assert.equal(result.tracks[0].source, 'soundcloud');
+  try {
+    const result = await resolveRequest('https://soundcloud.com/artist/track', 'Nizar', 1, manager);
+    assert.equal(result.tracks[0].title, 'From API');
+    assert.equal(result.tracks[0].source, 'soundcloud');
+  } finally {
+    global.fetch = originalFetch;
+    resetSoundCloudClientId();
+  }
 });
 
 test('soundcloud only treats full allowed tracks as playable', () => {

@@ -42,7 +42,10 @@ async function followShortLink(start, fetchImpl) {
       method: 'GET',
       redirect: 'manual',
       signal: AbortSignal.timeout(8000),
-      headers: { Accept: 'text/html' },
+      headers: {
+        Accept: 'text/html',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
     });
     const status = Number(response.status) || 0;
     if (status >= 300 && status < 400) {
@@ -94,9 +97,10 @@ async function canonicalSoundCloudUrl(input, fetchImpl = fetch) {
   }
   if (hostOf(url) === 'm.soundcloud.com') url.hostname = 'soundcloud.com';
   const page = cleanSoundCloudUrl(url.toString());
-  const parts = new URL(page).pathname.split('/').filter(Boolean);
-  if (hostOf(new URL(page)) !== 'soundcloud.com' || parts.length < 2) {
-    throw userError('Paste a SoundCloud track or playlist link.');
+  const parsed = new URL(page);
+  const parts = parsed.pathname.split('/').filter(Boolean);
+  if (hostOf(parsed) !== 'soundcloud.com' || !parts.length) {
+    throw userError('That SoundCloud link could not be opened.');
   }
   return page;
 }

@@ -24,7 +24,10 @@ const client = new Client({
 });
 
 const lavalink = createLavalink(client, config);
-const providers = new ProviderManager(config, () => lavalink.getIdealNode());
+const providers = new ProviderManager(config, () => {
+  lavalink.ensureConnected?.();
+  return lavalink.getIdealNode();
+});
 const music = new MusicManager({ client, lavalink, database, providers, config });
 attachInteractions(client, music);
 const stopHealth = startHealth({ lavalink, client, config });
