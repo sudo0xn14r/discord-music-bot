@@ -93,7 +93,7 @@ The bot reconnects if Lavalink drops, and Lavalink session resume is enabled. Th
 
 Commands: `/play`, `/k2`, `/playnow`, `/pause`, `/resume`, `/skip`, `/stop`, `/clear`, `/queue`, `/nowplaying`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter`, `/djrole`, `/playlist`, `/history`, `/stats`.
 
-`/k2` is the same command as `/play`. Set `PLAY_GIF_URL` to a direct GIF link and the bot posts that GIF when a song starts. Queuing behind a song that is already playing does not post it again.
+`/k2` is the same command as `/play`. When a song starts, the bot posts the Among Us GIF from Klipy. Set `PLAY_GIF_URL` to a different direct `.gif` link to change it. Queuing behind a song that is already playing does not post it again.
 
 The player is an embed with a progress bar. Buttons are Pause, Skip, Loop, Shuffle, Stop, and Previous. `/queue` pages through the upcoming songs. `/loop` is `off`, `track`, or `queue`. `/seek` takes seconds or `1:30`. `/filter` is `bassboost`, `nightcore`, or `off`. `/clear` removes upcoming songs and leaves the current one playing. `/playnow` interrupts the current song and keeps the rest of the queue.
 
