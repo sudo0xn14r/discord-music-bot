@@ -66,9 +66,12 @@ class MusicManager {
       }
       if (Date.now() - session.idleSince < limit) continue;
       session.idleSince = null;
+      const textChannelId = session.queue?.textChannelId;
+      const minutes = this.config.idleMinutes;
       try {
         await session.leave();
         log('info', 'left an idle voice channel', { guildId: session.guildId });
+        await this.announce(textChannelId, `I left the voice channel after ${minutes} minutes with nothing playing.`);
       } catch (error) {
         log('error', 'idle leave failed', { guildId: session.guildId, error: error.message });
       }
@@ -132,6 +135,17 @@ class MusicManager {
       });
     } finally {
       session.skipPersist = false;
+    }
+  }
+
+  async announce(channelId, text) {
+    if (!channelId || !this.client?.channels?.fetch) return;
+    try {
+      const channel = await this.client.channels.fetch(channelId);
+      if (!channel?.isTextBased?.() || !channel.send) return;
+      await channel.send({ content: text, allowedMentions: { parse: [] } });
+    } catch (error) {
+      log('error', 'idle notice failed', { error: error.message });
     }
   }
 

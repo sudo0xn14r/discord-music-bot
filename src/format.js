@@ -32,4 +32,15 @@ function shortError(error) {
   return message.replace(/\s+/g, ' ').trim().slice(0, 300) || 'Unknown error';
 }
 
-module.exports = { oneLine, formatDuration, formatTrackLength, shortError };
+function formatListened(ms) {
+  const minutes = Math.round(Math.max(0, Number(ms) || 0) / 60000);
+  if (minutes < 1) return 'under 1 minute';
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? '' : 's'}`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  const hourLabel = `${hours} hour${hours === 1 ? '' : 's'}`;
+  if (!rest) return `${hourLabel} (${minutes} minutes)`;
+  return `${hourLabel} ${rest} minute${rest === 1 ? '' : 's'} (${minutes} minutes)`;
+}
+
+module.exports = { oneLine, formatDuration, formatTrackLength, formatListened, shortError };

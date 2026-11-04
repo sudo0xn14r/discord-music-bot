@@ -1,6 +1,6 @@
 const { InteractionContextType, MessageFlags, PermissionFlagsBits, SlashCommandBuilder } = require('discord.js');
 const { UserError } = require('../errors');
-const { formatTrackLength, oneLine } = require('../format');
+const { formatListened, formatTrackLength, oneLine } = require('../format');
 const { MAX_QUEUE } = require('../music/queue');
 const { tracksFromPlaylist } = require('../music/playlist');
 const { resolveRequest } = require('../music/resolver');
@@ -103,6 +103,10 @@ const history = guildOnly(new SlashCommandBuilder())
   .setName('history')
   .setDescription('Show songs this server played recently');
 
+const stats = guildOnly(new SlashCommandBuilder())
+  .setName('stats')
+  .setDescription('Show the most played songs, the most active listeners, and total listening time');
+
 const seek = guildOnly(new SlashCommandBuilder())
   .setName('seek')
   .setDescription('Jump to a time in the current track')
@@ -196,6 +200,11 @@ function sameChannel(interaction, session) {
 
 function requestedBy(user) {
   return user.globalName || user.username;
+}
+
+function stampRequester(tracks, userId) {
+  if (!/^\d{17,20}$/.test(String(userId || ''))) return;
+  for (const track of tracks || []) track.requesterId = userId;
 }
 
 function playlistName(value) {
@@ -295,6 +304,7 @@ async function executePlay(interaction, music, { now = false } = {}) {
   }
   await interaction.deferReply();
   const resolved = await resolveRequest(query, requestedBy(interaction.user), room, music.providers);
+  stampRequester(resolved.tracks, interaction.user.id);
   session.bindTextChannel(interaction.channelId);
   await session.join(voice.id, interaction.guild?.shardId ?? 0);
   const result = await session.add(resolved.tracks, { now });
@@ -398,6 +408,26 @@ async function executeHistory(interaction, music) {
   return interaction.reply({ content: lines.join('\n').slice(0, 2000), allowedMentions: { parse: [] } });
 }
 
+async function executeStats(interaction, music) {
+  if (!interaction.inGuild()) throw new UserError('This bot only works in a server.');
+  music.peek(interaction.guildId)?.touchListen();
+  const report = music.database.playStats(interaction.guildId, 5);
+  if (!report.plays) return interaction.reply('No songs have been played here yet.');
+  const lines = [
+    `**${report.plays}** play${report.plays === 1 ? '' : 's'} · ${formatListened(report.playedMs)} listened`,
+    '',
+    '**Most played**',
+  ];
+  report.songs.forEach((song, index) => {
+    lines.push(`${index + 1}. ${oneLine(song.title)} — ${oneLine(song.artist)} · ${song.plays} play${song.plays === 1 ? '' : 's'} · ${formatListened(song.playedMs)}`);
+  });
+  lines.push('', '**Most active listeners**');
+  report.users.forEach((user, index) => {
+    lines.push(`${index + 1}. ${oneLine(user.requesterName)} · ${user.plays} play${user.plays === 1 ? '' : 's'} · ${formatListened(user.playedMs)}`);
+  });
+  return interaction.reply({ content: lines.join('\n').slice(0, 2000), allowedMentions: { parse: [] } });
+}
+
 async function replyWithPanel(interaction, session, text) {
   const message = await interaction.reply({ ...playerMessage(session, text), fetchReply: true });
   session.notePanel(message);
@@ -497,6 +527,7 @@ async function executePlaylist(interaction, music) {
   }
   const requester = requestedBy(interaction.user);
   const { tracks, missing } = tracksFromPlaylist(saved.tracks, music.providers, requester);
+  stampRequester(tracks, interaction.user.id);
   if (!tracks.length) {
     throw new UserError('None of the saved tracks are available from an enabled source anymore.');
   }
@@ -588,6 +619,7 @@ const commands = [
   { data: volume, execute: executeVolume },
   { data: playlist, execute: executePlaylist },
   { data: history, execute: executeHistory },
+  { data: stats, execute: executeStats },
   { data: seek, execute: executeSeek },
   { data: loop, execute: executeLoop },
   { data: shuffle, execute: executeShuffle },

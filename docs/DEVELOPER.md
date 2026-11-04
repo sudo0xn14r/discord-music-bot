@@ -154,7 +154,7 @@ Startup prints one `[provider]` line per provider from `ProviderManager.describe
 
 Every command is guild-only (`InteractionContextType.Guild`). Handlers live in `src/commands/index.js`. `src/events/interactions.js` dispatches chat input commands by name and buttons whose `customId` starts with `player:` or `queue:`.
 
-The user must be in a voice channel. If the bot is already in one, the user must be in that same channel. `/history`, `/playlist list`, `/playlist delete`, and `/djrole` do not require voice. `/volume` requires voice only when the bot is already connected.
+The user must be in a voice channel. If the bot is already in one, the user must be in that same channel. `/history`, `/stats`, `/playlist list`, `/playlist delete`, and `/djrole` do not require voice. `/volume` requires voice only when the bot is already connected.
 
 ### Who can do what
 
@@ -164,7 +164,7 @@ With a role stored:
 
 | Anyone in the voice channel | DJ role or Manage Server |
 | --- | --- |
-| `/play`, `/pause`, `/resume`, `/skip`, `/queue`, `/nowplaying`, `/history`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
+| `/play`, `/pause`, `/resume`, `/skip`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
 | Buttons Pause/Resume, Skip, Previous, queue pages | Buttons Stop, Loop, Shuffle |
 
 `/djrole` itself stays Manage Server only, role or not.
@@ -191,6 +191,7 @@ With a role stored:
 | `/filter name` | `off`, `bassboost`, or `nightcore`. |
 | `/playlist save\|load\|list\|delete` | Per-guild names, case-insensitive, 1–40 characters. |
 | `/history` | Last 10 rows from SQLite for this guild. |
+| `/stats` | Play counts and listened time for this guild: overall, top 5 songs, top 5 requesters. |
 | `/djrole role` | Set or clear. Empty role clears. Reply is ephemeral. |
 
 `/play` and `/playlist load` defer, then edit. The resulting message becomes the panel (`notePanel`). Other successful commands that change playback either edit that panel (`refreshPanel`) or reply with a fresh one.
@@ -424,9 +425,9 @@ Every 30 seconds, for each session that has a `channelId` and is not `leaving`:
 
 - Not idle: clear `idleSince`.
 - Idle and no timestamp yet: set `idleSince`.
-- Idle for at least `IDLE_MINUTES`: `leave()`.
+- Idle for at least `IDLE_MINUTES`: `leave()`, then a message in the session text channel: `I left the voice channel after N minutes with nothing playing.`
 
-Idle means the voice channel has no human members, or the queue is empty (no current and no upcoming). If the channel is not in the Discord cache, `voiceChannelEmpty` returns null and only an empty queue counts. Bots in the channel do not count as listeners. `IDLE_MINUTES=0` never starts the timer.
+Idle means the voice channel has no human members, or the queue is empty (no current and no upcoming). A paused song still has a current track, so the bot stays. If the channel is not in the Discord cache, `voiceChannelEmpty` returns null and only an empty queue counts. Bots in the channel do not count as listeners. `IDLE_MINUTES=0` never starts the timer. The check runs every 30 seconds, so the leave can be up to 30 seconds later than the limit.
 
 ## Panel
 
@@ -489,6 +490,12 @@ Stored per track: title, artist, album, duration, source, page URL, file path, S
 ### history
 
 Append-only play log, not the Previous stack. Inserted on Lavalink `start`. Each guild keeps the newest 100 rows. `/history` shows 10. Columns: title, artist, source, page URL, requester, `played_at`.
+
+### listens
+
+One row per time playback starts. `/stats` reads this table, not `history`, so the totals are not cut off at 100. `song_key` is the lowercased title and artist, so the same song groups together. `requester_id` is the Discord user id stamped when someone uses `/play`, `/playnow`, or `/playlist load`. Older rows without an id use `name:` plus the display name.
+
+`played_ms` is how far playback reached, not wall-clock time. A pause does not add time. A track that plays from the start through `finished` stores its duration. A skip stores the position reached. The row is updated at most every 15 seconds with the position, and closed on skip, stop, leave, shutdown, or the Lavalink `end` event. `/stats` shows the server total, the top 5 songs, and the top 5 listeners, each with a play count and listened time.
 
 ## Health
 
