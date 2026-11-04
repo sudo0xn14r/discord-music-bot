@@ -43,6 +43,15 @@ const skip = guildOnly(new SlashCommandBuilder())
   .setName('skip')
   .setDescription('Skip the current track');
 
+const skipto = guildOnly(new SlashCommandBuilder())
+  .setName('skipto')
+  .setDescription('Skip ahead to a track number shown in the player')
+  .addIntegerOption((option) => option
+    .setName('number')
+    .setDescription('Track number shown in the player')
+    .setRequired(true)
+    .setMinValue(1));
+
 const stop = guildOnly(new SlashCommandBuilder())
   .setName('stop')
   .setDescription('Stop playback and clear the queue');
@@ -143,13 +152,13 @@ const move = guildOnly(new SlashCommandBuilder())
   .setDescription('Move a queued song to another position')
   .addIntegerOption((option) => option
     .setName('from')
-    .setDescription('Current position in the queue')
+    .setDescription('Track number shown in the player')
     .setRequired(true)
     .setMinValue(1)
     .setMaxValue(MAX_QUEUE))
   .addIntegerOption((option) => option
     .setName('to')
-    .setDescription('New position in the queue')
+    .setDescription('New track number')
     .setRequired(true)
     .setMinValue(1)
     .setMaxValue(MAX_QUEUE));
@@ -159,7 +168,7 @@ const remove = guildOnly(new SlashCommandBuilder())
   .setDescription('Remove a song from the queue')
   .addIntegerOption((option) => option
     .setName('position')
-    .setDescription('Position in the queue')
+    .setDescription('Track number shown in the player')
     .setRequired(true)
     .setMinValue(1)
     .setMaxValue(MAX_QUEUE));
@@ -317,8 +326,7 @@ async function executePlay(interaction, music, { now = false } = {}) {
     await interaction.editReply({ content: 'That play was interrupted.', allowedMentions: { parse: [] } });
     return;
   }
-  const message = await interaction.editReply(playerMessage(session, describeAdd(result, resolved.notice)));
-  session.notePanel(message);
+  await publishPlayer(interaction, session, describeAdd(result, resolved.notice));
   await sendPlayGif(interaction, music, result);
 }
 
@@ -349,8 +357,20 @@ async function executeSkip(interaction, music) {
   else if (outcome?.ok === false) lines.push(outcome.reason);
   else lines.push('The queue is empty.');
   lines.push(...session.skippedNotes(outcome));
-  const message = await interaction.editReply(playerMessage(session, lines.join('\n')));
-  session.notePanel(message);
+  await publishPlayer(interaction, session, lines.join('\n'));
+}
+
+async function executeSkipTo(interaction, music) {
+  const session = activeSession(interaction, music);
+  const number = interaction.options.getInteger('number', true);
+  await interaction.deferReply();
+  const { outcome } = await session.skipTo(number);
+  const lines = [];
+  if (outcome?.track) lines.push(`Playing **${oneLine(outcome.track.title)}**.`);
+  else if (outcome?.ok === false) lines.push(outcome.reason);
+  else lines.push('The queue is empty.');
+  lines.push(...session.skippedNotes(outcome));
+  await publishPlayer(interaction, session, lines.join('\n'));
 }
 
 async function executeStop(interaction, music) {
@@ -435,6 +455,9 @@ async function executeStats(interaction, music) {
 }
 
 async function replyWithPanel(interaction, session, text) {
+  if (session.panel && await session.refreshPanel(text)) {
+    return interaction.reply({ content: text, allowedMentions: { parse: [] } });
+  }
   const message = await interaction.reply({ ...playerMessage(session, text), fetchReply: true });
   session.notePanel(message);
 }
@@ -547,9 +570,18 @@ async function executePlaylist(interaction, music) {
     await interaction.editReply({ content: 'That play was interrupted.', allowedMentions: { parse: [] } });
     return;
   }
-  const message = await interaction.editReply(playerMessage(session, describeAdd(result, notice)));
-  session.notePanel(message);
+  await publishPlayer(interaction, session, describeAdd(result, notice));
   await sendPlayGif(interaction, music, result);
+}
+
+async function publishPlayer(interaction, session, extra) {
+  const text = String(extra || 'Done.').slice(0, 2000);
+  if (session.panel && await session.refreshPanel(null)) {
+    await interaction.editReply({ content: text, embeds: [], components: [], allowedMentions: { parse: [] } });
+    return;
+  }
+  const message = await interaction.editReply(playerMessage(session, text));
+  session.notePanel(message);
 }
 
 async function sendPlayGif(interaction, music, result) {
@@ -627,6 +659,7 @@ const commands = [
   { data: pause, execute: executePause },
   { data: resume, execute: executeResume },
   { data: skip, execute: executeSkip },
+  { data: skipto, execute: executeSkipTo },
   { data: stop, execute: executeStop },
   { data: clear, execute: executeClear },
   { data: queue, execute: executeQueue },

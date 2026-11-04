@@ -120,6 +120,7 @@ class MusicManager {
         if (session.channelId || session.player) return;
         session.queue.current = row.current || null;
         session.queue.upcoming = Array.isArray(row.upcoming) ? row.upcoming : [];
+        session.queue.played = Number.isInteger(row.played) ? row.played : 0;
         session.queue.loopMode = ['off', 'track', 'queue'].includes(row.loopMode) ? row.loopMode : 'off';
         if (Number.isInteger(row.volume)) session.queue.volume = Math.min(150, Math.max(0, row.volume));
         session.positionMs = Number.isFinite(row.positionMs) ? row.positionMs : 0;

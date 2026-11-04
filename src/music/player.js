@@ -73,6 +73,7 @@ class GuildSession {
       filter: this.filter,
       current: this.queue.current,
       upcoming: this.queue.upcoming,
+      played: this.queue.played,
     };
   }
 
@@ -98,6 +99,7 @@ class GuildSession {
     this.lastPositionSave = now;
     this.touchListen();
     this.persist();
+    if (this.panel && this.queue.current) void this.refreshPanel(null);
   }
 
   beginListen(track) {
@@ -347,7 +349,7 @@ class GuildSession {
         return {
           ...placed,
           started: false,
-          position: this.queue.upcoming.length - placed.accepted.length + 1,
+          position: this.queue.position().index + this.queue.upcoming.length - placed.accepted.length + 1,
           outcome: { ok: true, skipped: [] },
         };
       }
@@ -386,6 +388,32 @@ class GuildSession {
       this.queue.shiftNext();
       const outcome = await this.playCurrent(this.generation);
       return { skipped, outcome };
+    });
+  }
+
+  async skipTo(position) {
+    return this.enqueue(async () => {
+      if (!this.queue.current) throw new UserError('Nothing is playing right now.');
+      const { index, total } = this.queue.position();
+      if (position === index) throw new UserError('That song is already playing.');
+      if (!Number.isInteger(position) || position < index || position > total || this.queue.upcoming.length === 0) {
+        throw new UserError(total > index ? `Pick a track from ${index + 1} to ${total}.` : 'Nothing else is queued.');
+      }
+      const target = this.queue.skipTo(position);
+      if (!target) throw new UserError(total > index ? `Pick a track from ${index + 1} to ${total}.` : 'Nothing else is queued.');
+      this.generation += 1;
+      this.playGeneration = -1;
+      this.finishListen();
+      if (this.player) {
+        try {
+          await this.player.stopTrack();
+        } catch (error) {
+          console.error(`[player:${this.guildId}] skip failed: ${error.message}`);
+        }
+      }
+      this.queue.shiftNext();
+      const outcome = await this.playCurrent(this.generation);
+      return { skipped: target, outcome };
     });
   }
 
@@ -569,17 +597,26 @@ class GuildSession {
 
   async removeUpcoming(index) {
     return this.enqueue(async () => {
-      const track = this.queue.removeAt(index);
-      if (!track) throw new UserError('That queue number is not in the list.');
+      const at = this.queue.upcomingIndex(index);
+      const track = at ? this.queue.removeAt(at) : null;
+      if (!track) {
+        const { index: here, total } = this.queue.position();
+        throw new UserError(total > here ? `Pick a track from ${here + 1} to ${total}.` : 'Nothing else is queued.');
+      }
       return `Removed **${oneLine(track.title)}**.`;
     });
   }
 
   async moveUpcoming(from, to) {
     return this.enqueue(async () => {
-      const track = this.queue.move(from, to);
-      if (!track) throw new UserError('Those queue numbers are not in the list.');
-      return `Moved **${oneLine(track.title)}** to position ${to}.`;
+      const start = this.queue.upcomingIndex(from);
+      const end = this.queue.upcomingIndex(to);
+      const track = start && end ? this.queue.move(start, end) : null;
+      if (!track) {
+        const { index: here, total } = this.queue.position();
+        throw new UserError(total > here ? `Pick tracks from ${here + 1} to ${total}.` : 'Nothing else is queued.');
+      }
+      return `Moved **${oneLine(track.title)}** to track ${to}.`;
     });
   }
 
@@ -654,17 +691,20 @@ class GuildSession {
   }
 
   async refreshPanel(extra) {
-    if (!this.panel) return;
+    if (!this.panel) return false;
     try {
       const channel = await this.manager.client.channels.fetch(this.panel.channelId);
-      if (!channel?.messages?.fetch) return;
+      if (!channel?.messages?.fetch) return false;
       const message = await channel.messages.fetch(this.panel.messageId);
       await message.edit(playerMessage(this, extra));
+      return true;
     } catch (error) {
+      if (error?.code === 10008) this.panel = null;
       if (!this.panelErrorLogged) {
         console.error(`[panel] ${error.message}`);
         this.panelErrorLogged = true;
       }
+      return false;
     }
   }
 }

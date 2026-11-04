@@ -165,7 +165,7 @@ With a role stored:
 
 | Anyone in the voice channel | DJ role or Manage Server |
 | --- | --- |
-| `/play`, `/k2`, `/pause`, `/resume`, `/skip`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
+| `/play`, `/k2`, `/pause`, `/resume`, `/skip`, `/skipto`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
 | Buttons Pause/Resume, Skip, Previous, queue pages | Buttons Stop, Loop, Shuffle |
 
 `/djrole` itself stays Manage Server only, role or not.
@@ -177,7 +177,8 @@ With a role stored:
 | `/play query` | Resolve a song name or a YouTube, SoundCloud, Bandcamp, Spotify, Apple, or Deezer link. Join, append. Starts playback only if nothing is current. |
 | `/playnow query` | DJ. Insert at the front, stop the current track, start the new one. The rest of the queue is kept, trimmed to 50. |
 | `/pause`, `/resume` | `setPaused` on the Lavalink player. |
-| `/skip` | Stop, advance, edit the panel. |
+| `/skip` | Stop, advance, and edit the existing player embed. |
+| `/skipto number` | Drop the upcoming songs before that track number, then play it. The number is the one shown in the player. |
 | `/stop` | DJ. Clear queue, memory history, and loop. Leave voice. |
 | `/leave` | DJ. Same path as stop, different reply text. |
 | `/clear` | DJ. Drop upcoming tracks. Current keeps playing. |
@@ -438,7 +439,7 @@ The embed title is `Playing` or `Paused` plus the title. The description is arti
 
 Buttons: Pause or Resume, Skip, Loop, Shuffle, Stop, and Previous. Previous is disabled when the in-memory history stack is empty. Shuffle is disabled below two upcoming tracks. An empty player removes the components.
 
-`session.panel` remembers one channel id and message id. `refreshPanel` fetches and edits it. The first edit failure is logged. Later failures are not, so a deleted panel does not spam. The next `/play`, `/skip`, or `/nowplaying` points the panel at a new message.
+`session.panel` remembers one channel id and message id. `refreshPanel` fetches and edits it when the song changes, when someone adds to the queue, and about every 15 seconds while a song is playing. A later `/play` keeps that message when it is still there. The first edit failure is logged. A deleted message is forgotten so the next command can post a new panel.
 
 `/queue` is a separate message. It is not the panel. Page buttons update that message only.
 
