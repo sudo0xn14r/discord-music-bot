@@ -33,6 +33,23 @@ function integer(name, fallback) {
   return value;
 }
 
+function httpUrl(name) {
+  const value = readEnv(name);
+  if (!value) return '';
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    console.error(`${name} must be an http or https URL.`);
+    process.exit(1);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    console.error(`${name} must be an http or https URL.`);
+    process.exit(1);
+  }
+  return url.toString();
+}
+
 function port(name, fallback) {
   const value = integer(name, fallback);
   if (value < 1 || value > 65535) {
@@ -81,6 +98,7 @@ function loadConfig() {
     providerOrder,
     idleMinutes: Math.max(0, integer('IDLE_MINUTES', 10)),
     uptimeUrl: readEnv('UPTIME_URL'),
+    playGifUrl: httpUrl('PLAY_GIF_URL'),
   };
 }
 

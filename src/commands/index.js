@@ -21,6 +21,11 @@ const play = guildOnly(new SlashCommandBuilder())
   .setDescription('Play a song name or a YouTube, SoundCloud, Bandcamp, Spotify, Apple, or Deezer link')
   .addStringOption(queryOption('Song name or a supported link'));
 
+const k2 = guildOnly(new SlashCommandBuilder())
+  .setName('k2')
+  .setDescription('Play a song, the same way as /play')
+  .addStringOption(queryOption('Song name or a supported link'));
+
 const playnow = guildOnly(new SlashCommandBuilder())
   .setName('playnow')
   .setDescription('Interrupt the current song and play this instead')
@@ -314,6 +319,7 @@ async function executePlay(interaction, music, { now = false } = {}) {
   }
   const message = await interaction.editReply(playerMessage(session, describeAdd(result, resolved.notice)));
   session.notePanel(message);
+  await sendPlayGif(interaction, music, result);
 }
 
 function activeSession(interaction, music) {
@@ -543,6 +549,13 @@ async function executePlaylist(interaction, music) {
   }
   const message = await interaction.editReply(playerMessage(session, describeAdd(result, notice)));
   session.notePanel(message);
+  await sendPlayGif(interaction, music, result);
+}
+
+async function sendPlayGif(interaction, music, result) {
+  const gif = music?.config?.playGifUrl;
+  if (!gif || !result?.started || !result.outcome?.ok) return;
+  await interaction.followUp({ content: gif, allowedMentions: { parse: [] } });
 }
 
 async function executeButton(interaction, music) {
@@ -605,8 +618,11 @@ async function executeButton(interaction, music) {
   throw new UserError('That button is not available.');
 }
 
+const executePlayCommand = (interaction, music) => executePlay(interaction, music);
+
 const commands = [
-  { data: play, execute: (interaction, music) => executePlay(interaction, music) },
+  { data: play, execute: executePlayCommand },
+  { data: k2, execute: executePlayCommand },
   { data: playnow, execute: (interaction, music) => executePlay(interaction, music, { now: true }) },
   { data: pause, execute: executePause },
   { data: resume, execute: executeResume },
@@ -629,4 +645,4 @@ const commands = [
   { data: djrole, execute: executeDjRole },
 ];
 
-module.exports = { commands, executeButton };
+module.exports = { commands, executeButton, sendPlayGif };

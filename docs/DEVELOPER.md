@@ -140,6 +140,7 @@ There is one Lavalink node, named `main`. Shoukaku options in `src/lavalink/clie
 | `LOCAL_MUSIC_DIR` | no | `music` | Resolved from the repo root |
 | `DATABASE_PATH` | no | `data/bot.sqlite` | Resolved from the repo root |
 | `IDLE_MINUTES` | no | `10` | `0` disables auto-leave |
+| `PLAY_GIF_URL` | no | empty | Direct http(s) GIF posted when `/play`, `/k2`, or `/playnow` starts a song |
 | `UPTIME_URL` | no | empty | GET every 30 seconds |
 | `SOUNDCLOUD_CLIENT_ID` | no | empty | Official API stays off without it |
 | `SOUNDCLOUD_CLIENT_SECRET` | no | empty | Used only to refresh the OAuth token |
@@ -164,7 +165,7 @@ With a role stored:
 
 | Anyone in the voice channel | DJ role or Manage Server |
 | --- | --- |
-| `/play`, `/pause`, `/resume`, `/skip`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
+| `/play`, `/k2`, `/pause`, `/resume`, `/skip`, `/queue`, `/nowplaying`, `/history`, `/stats`, playlist save/load/list/delete | `/playnow`, `/stop`, `/clear`, `/leave`, `/volume`, `/seek`, `/loop`, `/shuffle`, `/move`, `/remove`, `/filter` |
 | Buttons Pause/Resume, Skip, Previous, queue pages | Buttons Stop, Loop, Shuffle |
 
 `/djrole` itself stays Manage Server only, role or not.
@@ -194,7 +195,7 @@ With a role stored:
 | `/stats` | Play counts and listened time for this guild: overall, top 5 songs, top 5 requesters. |
 | `/djrole role` | Set or clear. Empty role clears. Reply is ephemeral. |
 
-`/play` and `/playlist load` defer, then edit. The resulting message becomes the panel (`notePanel`). Other successful commands that change playback either edit that panel (`refreshPanel`) or reply with a fresh one.
+`/play`, `/k2`, and `/playlist load` defer, then edit. `/k2` calls the same handler as `/play`. The resulting message becomes the panel (`notePanel`). If `PLAY_GIF_URL` is set and the command starts playback, a follow-up message contains that URL so Discord can animate it. Queuing behind a current song does not post the GIF. Other successful commands that change playback either edit that panel (`refreshPanel`) or reply with a fresh one. The panel edit does not include the GIF, so later button updates do not remove it.
 
 Errors:
 
